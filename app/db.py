@@ -183,7 +183,8 @@ def ensure_min_schema():
         """))
         _add_integer_column_if_missing(conn, "settlement_lines", "participant_id", 0)
         _add_integer_column_if_missing(conn, "settlement_lines", "batch_id", 0)
-        _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)
+        _add_float_column_if_missing(conn, "settlement_lines", "amount", 0.0)  # Original amount Spalte
+        _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)  # Deine neue Spalte
         _add_varchar_column_if_missing(conn, "settlement_lines", "description", "")
 
         # usage_events fehlende Spalten nachrüsten
