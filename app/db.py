@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL Umgebungsvariable ist nicht gesetzt.")
-# Railway liefert manchmal 'postgres://', SQLAlchemy erwartet 'postgresql://'
+# Railway liefert teils 'postgres://', SQLAlchemy erwartet 'postgresql://'
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -22,10 +22,9 @@ Base = declarative_base()
 
 def create_db_and_tables() -> None:
     """
-    Legt Tabellen gemäß SQLAlchemy-Models an (nur neue Tabellen/Spalten).
+    Legt Tabellen gemäß SQLAlchemy-Models an (nur neue Tabellen).
     Migriert KEINE bestehenden Tabellen – dafür gibt es ensure_min_schema().
     """
-    # Wichtig: Models importieren, damit Base alle Klassen kennt.
     from . import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
@@ -40,7 +39,8 @@ def get_db():
 
 
 # ---------------------------------------------------------------------
-# Leichte "Auto-Migration" für Policies (Schema-Drift heilen)
+# Kleine, robuste "Auto-Migration" für Policies (Schema-Drift heilen)
+#  -> nutzt KEINE Bind-Parameter in DDL/Casts; alles als Literale/casts
 # ---------------------------------------------------------------------
 def _column_exists(conn, table: str, column: str) -> bool:
     row = conn.execute(
@@ -55,29 +55,30 @@ def _column_exists(conn, table: str, column: str) -> bool:
     return row is not None
 
 
-def _add_json_column_if_missing(conn, table: str, column: str, default_json: str = "{}"):
-    # Spalte hinzufügen, falls sie fehlt
+def _add_json_column_if_missing(conn, table: str, column: str):
+    # 1) Spalte hinzufügen (ohne Default) falls sie fehlt
     if not _column_exists(conn, table, column):
-        conn.execute(
-            text(f"ALTER TABLE {table} ADD COLUMN {column} JSON DEFAULT :d::json"),
-            {"d": default_json},
-        )
-    # Nulls füllen, Default + NOT NULL setzen
-    conn.execute(text(f"UPDATE {table} SET {column} = :d::json WHERE {column} IS NULL"), {"d": default_json})
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT :d::json"), {"d": default_json})
+        conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} JSON'))
+
+    # 2) Nulls füllen (als Literal casten, kein Bind-Param mit ::json)
+    conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
+
+    # 3) Default + NOT NULL setzen
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 
 def _add_timestamptz_column_if_missing(conn, table: str, column: str):
     if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ DEFAULT NOW()"))
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ"))
+    # Nulls füllen, Default + NOT NULL
     conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 
 def _drop_column_if_exists(conn, table: str, column: str):
-    # IF EXISTS ist idempotent; separat prüfen ist optional – wir prüfen trotzdem.
+    # IF EXISTS ist idempotent; Vorprüfung ist optional.
     if _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
 
@@ -85,22 +86,11 @@ def _drop_column_if_exists(conn, table: str, column: str):
 def ensure_min_schema():
     """
     Für immer Ruhe:
-    - Stellt sicher, dass die Tabelle 'policies' existiert (falls nicht, minimal anlegen).
-    - Fügt 'body' (JSON NOT NULL DEFAULT '{}') hinzu, falls fehlend.
-    - Fügt 'created_at' (TIMESTAMPTZ NOT NULL DEFAULT NOW()) hinzu, falls fehlend.
-    - Entfernt Alt-Spalte 'definition', falls vorhanden.
-    Mehr brauchst du für den PoC/Prototype nicht.
+    - Stellt sicher, dass die Tabelle 'policies' existiert.
+    - Fügt 'body' (JSON NOT NULL DEFAULT '{}') hinzu und setzt Werte.
+    - Fügt 'created_at' (TIMESTAMPTZ NOT NULL DEFAULT NOW()) hinzu.
+    - Entfernt Legacy-Spalte 'definition' (falls vorhanden).
     """
     with engine.begin() as conn:
-        # Minimalen Tabellenrumpf sicherstellen (falls create_all() zuvor nicht lief)
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS policies (
-                id SERIAL PRIMARY KEY,
-                use_case VARCHAR NOT NULL
-            );
-        """))
-        # Zielschema sicherstellen
-        _add_json_column_if_missing(conn,  "policies", "body")
-        _add_timestamptz_column_if_missing(conn, "policies", "created_at")
-        # Legacy-Feld beseitigen
-        _drop_column_if_exists(conn, "policies", "definition")
+        # Minimalen Tabellenrumpf sicherstellen (falls create_all() noch nicht lief)
+        conn.execu
