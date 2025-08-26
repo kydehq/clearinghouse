@@ -40,7 +40,7 @@ def get_db():
 
 # ---------------------------------------------------------------------
 # Kleine, robuste "Auto-Migration" für Policies (Schema-Drift heilen)
-#  -> nutzt KEINE Bind-Parameter in DDL/Casts; alles als Literale/casts
+#  -> KEINE Bind-Parameter in DDL/Casts; alles als Literale/casts
 # ---------------------------------------------------------------------
 def _column_exists(conn, table: str, column: str) -> bool:
     row = conn.execute(
@@ -93,4 +93,16 @@ def ensure_min_schema():
     """
     with engine.begin() as conn:
         # Minimalen Tabellenrumpf sicherstellen (falls create_all() noch nicht lief)
-        conn.execu
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS policies (
+                id SERIAL PRIMARY KEY,
+                use_case VARCHAR NOT NULL
+            );
+        """))
+
+        # Zielschema sicherstellen
+        _add_json_column_if_missing(conn,  "policies", "body")
+        _add_timestamptz_column_if_missing(conn, "policies", "created_at")
+
+        # Legacy-Feld entschärfen/entfernen
+        _drop_column_if_exists(conn, "policies", "definition")
