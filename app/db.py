@@ -1,6 +1,7 @@
 # app/db.py
 import os
 from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Railway stellt oft DATABASE_URL bereit; manchmal beginnt sie mit 'postgres://'
@@ -26,3 +27,20 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+
+def ensure_min_schema():
+    # Legt policies an, falls sie fehlt, und rüstet fehlende Spalten nach.
+    with engine.begin() as conn:
+        conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS policies (
+            id SERIAL PRIMARY KEY,
+            use_case VARCHAR NOT NULL,
+            body JSON NOT NULL DEFAULT '{}'::json,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """))
+        conn.execute(text("ALTER TABLE policies ADD COLUMN IF NOT EXISTS body JSON NOT NULL DEFAULT '{}'::json;"))
+        conn.execute(text("ALTER TABLE policies ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();"))
+

@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from .db import create_db_and_tables, get_db
+from .db import create_db_and_tables, get_db, ensure_min_schema
+
 from .models import (
     Participant,
     ParticipantRole,
@@ -49,6 +50,7 @@ if STATIC_DIR.exists():
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
+    ensure_min_schema()
 
 
 # -----------------------------------------------------------------------------
