@@ -4,18 +4,27 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import uvicorn
 
+# Importiere unsere Datenbank-Tools und Modelle
+from .db import create_db_and_tables, get_db, engine, Base
+from . import models # Importiert models.py, um sicherzustellen, dass SQLAlchemy alle Modelle kennt
+
 # Pfad zum Ordner 'templates' definieren.
-# Wir gehen davon aus, dass der 'templates'-Ordner im selben Verzeichnis wie main.py liegt.
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # FastAPI-Anwendung initialisieren
 app = FastAPI(title="Clearinghouse POC")
 
-# Hier werden wir später unsere Datenbankverbindung und Modelle hinzufügen (Tag 2)
-# from .db import database # Stell dir vor, das kommt noch!
+# --- Event-Handler für den Start der Anwendung ---
+@app.on_event("startup")
+def on_startup():
+    """
+    Diese Funktion wird einmal beim Start der FastAPI-Anwendung ausgeführt.
+    Hier erstellen wir unsere Datenbanktabellen.
+    """
+    create_db_and_tables()
 
-# --- Routen der Anwendung ---
+# --- Routen der Anwendung (bleiben für Tag 2 gleich) ---
 
 @app.get("/", response_class=HTMLResponse, summary="Startseite: Anwendungsfall-Auswahl")
 async def read_root(request: Request):
@@ -34,7 +43,7 @@ async def upload_page(request: Request):
     Wird in späteren Schritten implementiert.
     """
     return templates.TemplateResponse(
-        "results.html", # Wir verwenden hier erstmal results.html als Platzhalter
+        "results.html",
         {"request": request, "title": "Daten hochladen", "message": "Dies ist die Upload-Seite. Sie wird noch implementiert."}
     )
 
@@ -61,6 +70,6 @@ async def audit_page(request: Request):
     )
 
 # Diese Zeile ist wichtig, damit Railway (oder ein lokaler Server) weiß, wie er die App startet.
-# Wenn du die Datei direkt ausführst (z.B. `python main.py`), startet Uvicorn die App.
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
