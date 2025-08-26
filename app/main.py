@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates # RequestValidationError entfernt
+from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-import uvicorn
+import uvicorn # Behalten, falls du es für einen lokalen Test-Run nutzen willst
 import json
 import io
 import pandas as pd
-import traceback # Neu für detailliertere Fehlermeldungen in Logs
+import traceback
 
 # Importiere unsere Datenbank-Tools und Modelle
 from .db import create_db_and_tables, get_db, SessionLocal
@@ -21,17 +21,9 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI(title="Clearinghouse POC")
 
 # --- Statische Dateien einbinden ---
-# Der Ordner 'demo_data' liegt im Hauptverzeichnis des Projekts.
-# Wir müssen den Pfad so einrichten, dass FastAPI ihn findet.
-# 'app/static' wird als '/static' URL bereitgestellt.
-# 'demo_data' (im Wurzelverzeichnis) wird auch als '/static/demo_data' bereitgestellt.
-# Da demo_data auf der gleichen Ebene wie app liegt, müssen wir den Pfad anders behandeln.
-# Korrekter Weg, wenn `demo_data` auf der gleichen Ebene wie `app` ist:
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-# Für demo_data, wenn es im Projektwurzelverzeichnis liegt:
-PROJECT_ROOT = BASE_DIR.parent # Gehe vom 'app'-Ordner zum Projektwurzel
+PROJECT_ROOT = BASE_DIR.parent
 app.mount("/static/demo_data", StaticFiles(directory=str(PROJECT_ROOT / "demo_data")), name="demo_data_static")
-
 
 # --- Event-Handler für den Start der Anwendung ---
 @app.on_event("startup")
@@ -43,18 +35,17 @@ def on_startup():
     create_db_and_tables()
 
 # --- Exception Handler für allgemeine Fehler ---
-# Dieser Handler fängt unaufgeforderte Ausnahmen ab und loggt sie detailliert.
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     error_message = f"Ein unerwarteter Server-Fehler ist aufgetreten: {exc}\n{traceback.format_exc()}"
-    print(error_message) # Wichtig: Den vollständigen Traceback im Log ausgeben
+    print(error_message)
     return templates.TemplateResponse(
         "results.html",
         {"request": request, "title": "Interner Server-Fehler", "message": "Es gab ein Problem beim Verarbeiten Ihrer Anfrage. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support. Details finden Sie in den Server-Logs."},
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
     )
 
-
+# --- Deine Routen (ungeändert) ---
 @app.get("/", response_class=HTMLResponse, summary="Startseite: Anwendungsfall-Auswahl")
 async def read_root(request: Request):
     return templates.TemplateResponse(
@@ -83,9 +74,9 @@ async def get_upload_page(request: Request, case: str = "energy_community"):
             "base_fee_per_unit": 5.00
         }
 
-    try: # Zusätzlicher Try-Except Block zur Fehlerisolierung beim Template-Rendering
+    try:
         return templates.TemplateResponse(
-            "upload.html",
+            "uploads.html", # Hier war ein kleiner Tippfehler in deiner originalen Datei, es sollte 'uploads.html' sein
             {
                 "request": request,
                 "title": f"Daten & Policy für {case.replace('_', ' ').title()} hochladen",
@@ -94,15 +85,12 @@ async def get_upload_page(request: Request, case: str = "energy_community"):
             }
         )
     except Exception as e:
-        # Fängt spezifische Fehler beim Rendern des Templates ab und loggt sie
-        error_message = f"Fehler beim Rendern von upload.html für Fall '{case}': {e}\n{traceback.format_exc()}"
+        error_message = f"Fehler beim Rendern von uploads.html für Fall '{case}': {e}\n{traceback.format_exc()}"
         print(error_message)
-        # Wirft eine HTTPException, die vom allgemeinen Exception-Handler abgefangen wird
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Fehler beim Laden der Upload-Seite: {e}"
         )
-
 
 @app.post("/process_data", response_class=HTMLResponse, summary="Daten verarbeiten und Settlement starten")
 async def process_data(
@@ -162,13 +150,12 @@ async def process_data(
         )
     except Exception as e:
         error_message = f"Ein unerwarteter Fehler in process_data ist aufgetreten: {e}\n{traceback.format_exc()}"
-        print(error_message) # Auch hier detaillierte Logs
+        print(error_message)
         return templates.TemplateResponse(
             "results.html",
             {"request": request, "title": "Fehler", "message": f"Ein unerwarteter Fehler ist aufgetreten: {e}"},
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
 
 @app.get("/results", response_class=HTMLResponse, summary="Ergebnisseite (Platzhalter)")
 async def results_page(request: Request):
@@ -184,5 +171,7 @@ async def audit_page(request: Request):
         {"request": request, "title": "Audit", "message": "Dies ist die Audit-Seite. Sie wird noch implementiert."}
     )
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# --- Entferne diesen Block oder kommentiere ihn aus, wenn du Uvicorn über die Kommandozeile startest ---
+# if __name__ == "__main__":
+#    uvicorn.run(app, host="0.0.0.0", port=8000)
+
