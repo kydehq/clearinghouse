@@ -1,0 +1,1 @@
+  # MockBankAdapter, payout(), check_status()
