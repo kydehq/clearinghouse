@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates, RequestValidationError # RequestValidationError hinzugefügt (falls benötigt)
+from fastapi.templating import Jinja2Templates # RequestValidationError entfernt
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import uvicorn
@@ -186,4 +186,3 @@ async def audit_page(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
