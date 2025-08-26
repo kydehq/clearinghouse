@@ -39,7 +39,7 @@ def get_db():
 
 
 # ---------------------------------------------------------------------
-# Kleine, robuste "Auto-Migration" für Policies (Schema-Drift heilen)
+# Helpers für minimale, idempotente "Auto-Migration"
 #  -> KEINE Bind-Parameter in DDL/Casts; alles als Literale/casts
 # ---------------------------------------------------------------------
 def _column_exists(conn, table: str, column: str) -> bool:
@@ -56,14 +56,9 @@ def _column_exists(conn, table: str, column: str) -> bool:
 
 
 def _add_json_column_if_missing(conn, table: str, column: str):
-    # 1) Spalte hinzufügen (ohne Default) falls sie fehlt
     if not _column_exists(conn, table, column):
         conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} JSON'))
-
-    # 2) Nulls füllen (als Literal casten, kein Bind-Param mit ::json)
     conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
-
-    # 3) Default + NOT NULL setzen
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
@@ -71,38 +66,20 @@ def _add_json_column_if_missing(conn, table: str, column: str):
 def _add_timestamptz_column_if_missing(conn, table: str, column: str):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ"))
-    # Nulls füllen, Default + NOT NULL
     conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 
-def _drop_column_if_exists(conn, table: str, column: str):
-    # IF EXISTS ist idempotent; Vorprüfung ist optional.
-    if _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
+def _add_float_column_if_missing(conn, table: str, column: str, default: float = 0.0):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE PRECISION"))
+    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 
-def ensure_min_schema():
-    """
-    Für immer Ruhe:
-    - Stellt sicher, dass die Tabelle 'policies' existiert.
-    - Fügt 'body' (JSON NOT NULL DEFAULT '{}') hinzu und setzt Werte.
-    - Fügt 'created_at' (TIMESTAMPTZ NOT NULL DEFAULT NOW()) hinzu.
-    - Entfernt Legacy-Spalte 'definition' (falls vorhanden).
-    """
-    with engine.begin() as conn:
-        # Minimalen Tabellenrumpf sicherstellen (falls create_all() noch nicht lief)
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS policies (
-                id SERIAL PRIMARY KEY,
-                use_case VARCHAR NOT NULL
-            );
-        """))
-
-        # Zielschema sicherstellen
-        _add_json_column_if_missing(conn,  "policies", "body")
-        _add_timestamptz_column_if_missing(conn, "policies", "created_at")
-
-        # Legacy-Feld entschärfen/entfernen
-        _drop_column_if_exists(conn, "policies", "definition")
+def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
+    # Default-
