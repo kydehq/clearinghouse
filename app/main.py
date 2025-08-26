@@ -1,15 +1,17 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.templating import Jinja2Templates, RequestValidationError # RequestValidationError hinzugefügt (falls benötigt)
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import uvicorn
-import json # Benötigt, um JSON-Policies zu parsen
-import io # Benötigt, um hochgeladene CSV-Dateien zu lesen
-import pandas as pd # Hilft beim Lesen von CSV-Dateien (muss noch in requirements.txt)
+import json
+import io
+import pandas as pd
+import traceback # Neu für detailliertere Fehlermeldungen in Logs
 
 # Importiere unsere Datenbank-Tools und Modelle
 from .db import create_db_and_tables, get_db, SessionLocal
-from . import models # Importiert models.py, um sicherzustellen, dass SQLAlchemy alle Modelle kennt
+from . import models
 
 # Pfad zum Ordner 'templates' definieren.
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,6 +19,19 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # FastAPI-Anwendung initialisieren
 app = FastAPI(title="Clearinghouse POC")
+
+# --- Statische Dateien einbinden ---
+# Der Ordner 'demo_data' liegt im Hauptverzeichnis des Projekts.
+# Wir müssen den Pfad so einrichten, dass FastAPI ihn findet.
+# 'app/static' wird als '/static' URL bereitgestellt.
+# 'demo_data' (im Wurzelverzeichnis) wird auch als '/static/demo_data' bereitgestellt.
+# Da demo_data auf der gleichen Ebene wie app liegt, müssen wir den Pfad anders behandeln.
+# Korrekter Weg, wenn `demo_data` auf der gleichen Ebene wie `app` ist:
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# Für demo_data, wenn es im Projektwurzelverzeichnis liegt:
+PROJECT_ROOT = BASE_DIR.parent # Gehe vom 'app'-Ordner zum Projektwurzel
+app.mount("/static/demo_data", StaticFiles(directory=str(PROJECT_ROOT / "demo_data")), name="demo_data_static")
+
 
 # --- Event-Handler für den Start der Anwendung ---
 @app.on_event("startup")
@@ -27,13 +42,21 @@ def on_startup():
     """
     create_db_and_tables()
 
-# --- Routen der Anwendung ---
+# --- Exception Handler für allgemeine Fehler ---
+# Dieser Handler fängt unaufgeforderte Ausnahmen ab und loggt sie detailliert.
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    error_message = f"Ein unerwarteter Server-Fehler ist aufgetreten: {exc}\n{traceback.format_exc()}"
+    print(error_message) # Wichtig: Den vollständigen Traceback im Log ausgeben
+    return templates.TemplateResponse(
+        "results.html",
+        {"request": request, "title": "Interner Server-Fehler", "message": "Es gab ein Problem beim Verarbeiten Ihrer Anfrage. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support. Details finden Sie in den Server-Logs."},
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+
 
 @app.get("/", response_class=HTMLResponse, summary="Startseite: Anwendungsfall-Auswahl")
 async def read_root(request: Request):
-    """
-    Zeigt die Startseite an, auf der Benutzer zwischen verschiedenen Anwendungsfällen wählen können.
-    """
     return templates.TemplateResponse(
         "case_selector.html",
         {"request": request, "title": "Anwendungsfall auswählen"}
@@ -41,13 +64,8 @@ async def read_root(request: Request):
 
 @app.get("/upload", response_class=HTMLResponse, summary="Upload-Seite für Daten und Policy-Eingabe")
 async def get_upload_page(request: Request, case: str = "energy_community"):
-    """
-    Zeigt die Upload-Seite an, auf der Benutzer eine CSV-Datei und eine JSON-Policy hochladen können.
-    Der 'case'-Parameter wird aus der URL gelesen, um den gewählten Anwendungsfall anzuzeigen.
-    """
     default_policy = {}
     if case == "energy_community":
-        # Eine Standard-Policy für Energy Community
         default_policy = {
             "use_case": "energy_community",
             "prosumer_sell_price": 0.15,
@@ -56,7 +74,6 @@ async def get_upload_page(request: Request, case: str = "energy_community"):
             "grid_feed_price": 0.08
         }
     elif case == "mieterstrom":
-        # Eine Standard-Policy für Mieterstrom
         default_policy = {
             "use_case": "mieterstrom",
             "tenant_price_per_kwh": 0.18,
@@ -66,29 +83,35 @@ async def get_upload_page(request: Request, case: str = "energy_community"):
             "base_fee_per_unit": 5.00
         }
 
-    return templates.TemplateResponse(
-        "upload.html",
-        {
-            "request": request,
-            "title": f"Daten & Policy für {case.replace('_', ' ').title()} hochladen",
-            "case": case,
-            "default_policy_json": json.dumps(default_policy, indent=2) # Policy als schön formatierten JSON-String
-        }
-    )
+    try: # Zusätzlicher Try-Except Block zur Fehlerisolierung beim Template-Rendering
+        return templates.TemplateResponse(
+            "upload.html",
+            {
+                "request": request,
+                "title": f"Daten & Policy für {case.replace('_', ' ').title()} hochladen",
+                "case": case,
+                "default_policy_json": json.dumps(default_policy, indent=2)
+            }
+        )
+    except Exception as e:
+        # Fängt spezifische Fehler beim Rendern des Templates ab und loggt sie
+        error_message = f"Fehler beim Rendern von upload.html für Fall '{case}': {e}\n{traceback.format_exc()}"
+        print(error_message)
+        # Wirft eine HTTPException, die vom allgemeinen Exception-Handler abgefangen wird
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler beim Laden der Upload-Seite: {e}"
+        )
+
 
 @app.post("/process_data", response_class=HTMLResponse, summary="Daten verarbeiten und Settlement starten")
 async def process_data(
     request: Request,
-    case: str = Form(...), # Der Anwendungsfall vom Formular
-    csv_file: UploadFile = File(...), # Die hochgeladene CSV-Datei
-    policy_json_str: str = Form(...) # Die JSON-Policy als String vom Formular
+    case: str = Form(...),
+    csv_file: UploadFile = File(...),
+    policy_json_str: str = Form(...)
 ):
-    """
-    Empfängt die hochgeladene CSV-Datei und die JSON-Policy, verarbeitet sie
-    und leitet den Settlement-Prozess ein.
-    """
     try:
-        # 1. Policy parsen
         policy_data = json.loads(policy_json_str)
         if policy_data.get("use_case") != case:
             return templates.TemplateResponse(
@@ -97,19 +120,13 @@ async def process_data(
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2. CSV-Datei lesen (hier nur als Beispiel, wird später verarbeitet)
         contents = await csv_file.read()
         csv_data = pd.read_csv(io.StringIO(contents.decode('utf-8')))
 
-        # Debug-Ausgabe in den Logs (später entfernen)
         print(f"Verarbeite Case: {case}")
         print(f"Policy Daten: {policy_data}")
         print(f"CSV-Daten (erste 5 Zeilen):\n{csv_data.head()}")
 
-        # Hier würden wir später die Daten in die DB speichern und den Settlement-Prozess starten
-        # Für jetzt leiten wir einfach auf eine Erfolgsseite um.
-
-        # Beispiel: Eine Policy in der DB speichern (später mit Fehlerbehandlung)
         db_session = SessionLocal()
         try:
             new_policy = models.Policy(
@@ -132,8 +149,6 @@ async def process_data(
         finally:
             db_session.close()
 
-
-        # Erfolgreiche Verarbeitung -> Weiterleiten zur Ergebnisseite
         return templates.TemplateResponse(
             "results.html",
             {"request": request, "title": "Verarbeitung erfolgreich!", "message": "Daten wurden empfangen und die Policy gespeichert. Das Settlement wird demnächst gestartet."}
@@ -146,19 +161,17 @@ async def process_data(
             status_code=status.HTTP_400_BAD_REQUEST
         )
     except Exception as e:
+        error_message = f"Ein unerwarteter Fehler in process_data ist aufgetreten: {e}\n{traceback.format_exc()}"
+        print(error_message) # Auch hier detaillierte Logs
         return templates.TemplateResponse(
             "results.html",
             {"request": request, "title": "Fehler", "message": f"Ein unerwarteter Fehler ist aufgetreten: {e}"},
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-# Die anderen Platzhalter-Seiten bleiben vorerst wie gehabt
+
 @app.get("/results", response_class=HTMLResponse, summary="Ergebnisseite (Platzhalter)")
 async def results_page(request: Request):
-    """
-    Platzhalter-Seite für die Anzeige der Berechnungsergebnisse.
-    Wird in späteren Schritten implementiert.
-    """
     return templates.TemplateResponse(
         "results.html",
         {"request": request, "title": "Ergebnisse", "message": "Dies ist die Ergebnisseite. Sie wird noch implementiert."}
@@ -166,16 +179,11 @@ async def results_page(request: Request):
 
 @app.get("/audit", response_class=HTMLResponse, summary="Audit-Seite (Platzhalter)")
 async def audit_page(request: Request):
-    """
-    Platzhalter-Seite für die Anzeige von Audit-Informationen.
-    Wird in späteren Schritten implementiert.
-    """
     return templates.TemplateResponse(
         "results.html",
         {"request": request, "title": "Audit", "message": "Dies ist die Audit-Seite. Sie wird noch implementiert."}
     )
 
-# Diese Zeile ist wichtig, damit Railway (oder ein lokaler Server) weiß, wie er die App startet.
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
