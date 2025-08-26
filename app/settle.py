@@ -88,7 +88,7 @@ def apply_policy_and_settle(
     use_case: str,
     policy_body: dict,
     events: Iterable[UsageEvent]
-) -> Tuple[SettlementBatch, Dict[int, dict]]:
+) -> Tuple[SettlementBatch, Dict]:
     # 1) Events aggregieren
     agg = defaultdict(lambda: defaultdict(float))
     participants: Dict[int, Participant] = {}
@@ -194,24 +194,32 @@ def apply_policy_and_settle(
     # 3) Bilateral Netting anwenden
     final_balances, netting_stats = apply_bilateral_netting(result)
 
-    # 4) Erweiterte KPIs berechnen - FIXED: Ensure all participants have complete records
+    # 4) Erweiterte KPIs berechnen - Create clean participant-only result
+    participant_result = {}
+    
+    # Process all participants from final_balances first
     for pid in final_balances.keys():
         if pid not in result:
             # Initialize missing participant with zero values
-            result[pid] = {'credit': 0.0, 'debit': 0.0, 'net': 0.0, 'final_net': 0.0}
-        
-        # Update with final netting results
-        result[pid]['net'] = final_balances[pid]
-        result[pid]['final_net'] = final_balances[pid]
+            participant_result[pid] = {'credit': 0.0, 'debit': 0.0, 'net': 0.0, 'final_net': 0.0}
+        else:
+            # Copy existing data
+            participant_result[pid] = {
+                'credit': result[pid]['credit'],
+                'debit': result[pid]['debit'],
+                'net': final_balances[pid],
+                'final_net': final_balances[pid]
+            }
 
-    # Ensure all participants who had transactions but zero final balance are included
-    for pid in result.keys():
-        if pid not in final_balances:
-            final_balances[pid] = 0.0
-            result[pid]['final_net'] = 0.0
+    # Add any remaining participants from original result (shouldn't happen, but safety net)
+    for pid, data in result.items():
+        if isinstance(pid, int) and pid not in participant_result:
+            participant_result[pid] = data.copy()
+            participant_result[pid]['final_net'] = final_balances.get(pid, 0.0)
 
-    # Netting-Statistiken zu result hinzufügen
-    result['_netting_stats'] = netting_stats
+    # Create the final result dict with stats separate
+    final_result = participant_result.copy()
+    final_result['_netting_stats'] = netting_stats
 
     # 5) In DB speichern (nur finale Netto-Beträge)
     batch = SettlementBatch(use_case=use_case)
@@ -230,4 +238,4 @@ def apply_policy_and_settle(
 
     db.commit()
     db.refresh(batch)
-    return batch, result
+    return batch, final_result
