@@ -21,8 +21,8 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
     total_abs_before_internal = 0.0
     
     for pid, balances in participants_balances.items():
-        credit = balances['credit']
-        debit = balances['debit']
+        credit = balances.get('credit', 0.0)  # Fix: use .get() with default
+        debit = balances.get('debit', 0.0)    # Fix: use .get() with default
         net = credit - debit
         internal_netted[pid] = net
         total_abs_before_internal += abs(credit) + abs(debit)
@@ -194,13 +194,21 @@ def apply_policy_and_settle(
     # 3) Bilateral Netting anwenden
     final_balances, netting_stats = apply_bilateral_netting(result)
 
-    # 4) Erweiterte KPIs berechnen
-    for pid, final_net in final_balances.items():
-        if pid in result:
-            result[pid]['net'] = final_net
-            result[pid]['final_net'] = final_net
-        else:
-            result[pid] = {'credit': 0.0, 'debit': 0.0, 'net': final_net, 'final_net': final_net}
+    # 4) Erweiterte KPIs berechnen - FIXED: Ensure all participants have complete records
+    for pid in final_balances.keys():
+        if pid not in result:
+            # Initialize missing participant with zero values
+            result[pid] = {'credit': 0.0, 'debit': 0.0, 'net': 0.0, 'final_net': 0.0}
+        
+        # Update with final netting results
+        result[pid]['net'] = final_balances[pid]
+        result[pid]['final_net'] = final_balances[pid]
+
+    # Ensure all participants who had transactions but zero final balance are included
+    for pid in result.keys():
+        if pid not in final_balances:
+            final_balances[pid] = 0.0
+            result[pid]['final_net'] = 0.0
 
     # Netting-Statistiken zu result hinzufügen
     result['_netting_stats'] = netting_stats
