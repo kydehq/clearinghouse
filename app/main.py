@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="KYDE PoC")
+app = FastAPI(title="KYDE PoC", debug=True)
 
 if not TEMPLATES_DIR.exists():
     TEMPLATES_DIR = Path("templates")
