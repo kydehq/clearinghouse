@@ -21,16 +21,12 @@ Base = declarative_base()
 
 
 def create_db_and_tables() -> None:
-    """
-    Legt Tabellen gemäß SQLAlchemy-Models an (nur neue Tabellen).
-    Migriert KEINE bestehenden Tabellen – dafür gibt es ensure_min_schema().
-    """
+    """legt neue Tabellen an (migriert nicht bestehende)."""
     from . import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
 def get_db():
-    """FastAPI-Dependency für eine DB-Session."""
     db = SessionLocal()
     try:
         yield db
@@ -39,8 +35,7 @@ def get_db():
 
 
 # ---------------------------------------------------------------------
-# Helpers für minimale, idempotente "Auto-Migration"
-#  -> KEINE Bind-Parameter in DDL/Casts; alles als Literale/casts
+# Mini-"Auto-Migration" (idempotent, ohne Bind-Parameter in DDL)
 # ---------------------------------------------------------------------
 def _column_exists(conn, table: str, column: str) -> bool:
     row = conn.execute(
@@ -82,4 +77,38 @@ def _add_float_column_if_missing(conn, table: str, column: str, default: float =
 def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
-    # Default-
+    lit = default.replace("'", "''")
+    conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+
+
+def _drop_column_if_exists(conn, table: str, column: str):
+    if _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
+
+
+def ensure_min_schema():
+    """
+    Heilt Schema-Drift für PoC-Tabellen:
+      - policies: body(JSON), created_at(TIMESTAMPTZ), DROP definition
+      - usage_events: quantity(FLOAT), unit(VARCHAR 'kWh'), meta(JSON), timestamp(TIMESTAMPTZ)
+    """
+    with engine.begin() as conn:
+        # policies minimal sichern
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS policies (
+                id SERIAL PRIMARY KEY,
+                use_case VARCHAR NOT NULL
+            );
+        """))
+        _add_json_column_if_missing(conn,  "policies", "body")
+        _add_timestamptz_column_if_missing(conn, "policies", "created_at")
+        _drop_column_if_exists(conn, "policies", "definition")
+
+        # usage_events fehlende Spalten nachrüsten
+        _add_float_column_if_missing(conn,   "usage_events", "quantity", 0.0)
+        _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")
+        if not _column_exists(conn, "usage_events", "meta"):
+            conn.execute(text("ALTER TABLE usage_events ADD COLUMN meta JSON"))
+        _add_timestamptz_column_if_missing(conn, "usage_events", "timestamp")
