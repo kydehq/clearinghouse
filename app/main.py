@@ -21,9 +21,14 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app = FastAPI(title="Clearinghouse POC")
 
 # --- Statische Dateien einbinden ---
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+# Korrektur hier: Der static-Ordner liegt im Projekt-Root, nicht im App-Ordner.
+# BASE_DIR ist der Ordner, der main.py enthält (z.B. /app/app)
+# PROJECT_ROOT ist der Ordner über BASE_DIR (z.B. /app)
 PROJECT_ROOT = BASE_DIR.parent
+app.mount("/static", StaticFiles(directory=str(PROJECT_ROOT / "static")), name="static")
+# Für demo_data, das ebenfalls im Projektwurzelverzeichnis liegt, ist der Pfad bereits korrekt.
 app.mount("/static/demo_data", StaticFiles(directory=str(PROJECT_ROOT / "demo_data")), name="demo_data_static")
+
 
 # --- Event-Handler für den Start der Anwendung ---
 @app.on_event("startup")
@@ -76,7 +81,7 @@ async def get_upload_page(request: Request, case: str = "energy_community"):
 
     try:
         return templates.TemplateResponse(
-            "uploads.html", # Hier war ein kleiner Tippfehler in deiner originalen Datei, es sollte 'uploads.html' sein
+            "uploads.html",
             {
                 "request": request,
                 "title": f"Daten & Policy für {case.replace('_', ' ').title()} hochladen",
@@ -174,4 +179,3 @@ async def audit_page(request: Request):
 # --- Entferne diesen Block oder kommentiere ihn aus, wenn du Uvicorn über die Kommandozeile startest ---
 # if __name__ == "__main__":
 #    uvicorn.run(app, host="0.0.0.0", port=8000)
-
