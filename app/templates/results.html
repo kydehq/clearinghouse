@@ -2,69 +2,90 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{{ title }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{--bg:#f6f7f9;--card:#fff;--muted:#6b7280;--text:#0f172a;--ok:#14532d;--warn:#92400e;--err:#7f1d1d;--line:#e5e7eb}
+    body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
+    .wrap{max-width:1100px;margin:32px auto;padding:16px}
+    .card{background:var(--card);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.06);padding:24px}
+    h1{margin:0 0 16px;font-size:28px}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:10px 0 16px}
+    .kpi{background:#f3f4f6;border-radius:12px;padding:12px}
+    .muted{color:var(--muted);font-size:13px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:10px 12px;text-align:left}
+    thead th{border-bottom:1px solid var(--line);font-weight:600}
+    tbody tr{border-bottom:1px solid var(--line)}
+    tbody tr:hover{background:#f9fafb}
+    .btn{display:inline-block;background:#111827;color:#fff;padding:8px 12px;border-radius:10px;text-decoration:none;font-size:14px}
+    .link{color:#2563eb;text-decoration:none}
+    .link:hover{text-decoration:underline}
+    .alert{border-radius:12px;padding:12px;margin:12px 0}
+    .info{background:#fef9c3;color:var(--warn)}
+    .error{background:#fee2e2;color:var(--err);white-space:pre-wrap}
+    details{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:10px 14px;margin-top:8px}
+    summary{cursor:pointer;font-weight:600}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:13px}
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen p-6">
-  <div class="max-w-5xl mx-auto bg-white shadow-xl rounded-2xl p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">{{ title }}</h1>
-      {% if batch_id %}
-      <a href="/audit?batch_id={{ batch_id }}" class="text-sm px-3 py-2 rounded-lg bg-gray-900 text-white">Audit-Ansicht</a>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h1>{{ title }}</h1>
+        {% if batch_id %}
+          <a class="btn" href="/audit?batch_id={{ batch_id }}">Audit-Ansicht</a>
+        {% endif %}
+      </div>
+
+      {% if message %}
+        <div class="alert info">{{ message }}</div>
       {% endif %}
-    </div>
 
-    {% if kpis %}
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="p-4 bg-gray-100 rounded-xl">
-        <div class="text-sm text-gray-500">Teilnehmer</div>
-        <div class="text-xl font-semibold">{{ kpis.participants }}</div>
-      </div>
-      <div class="p-4 bg-gray-100 rounded-xl">
-        <div class="text-sm text-gray-500">Summe Credit</div>
-        <div class="text-xl font-semibold">€ {{ '%.2f'|format(kpis.sum_credit) }}</div>
-      </div>
-      <div class="p-4 bg-gray-100 rounded-xl">
-        <div class="text-sm text-gray-500">Summe Debit</div>
-        <div class="text-xl font-semibold">€ {{ '%.2f'|format(kpis.sum_debit) }}</div>
-      </div>
-      <div class="p-4 bg-gray-100 rounded-xl">
-        <div class="text-sm text-gray-500">Netting-Effizienz</div>
-        <div class="text-xl font-semibold">{{ '%.0f'|format(kpis.netting_efficiency * 100) }}%</div>
-      </div>
-    </div>
-    {% endif %}
+      {% if error %}
+        <div class="alert error">
+          <strong>Fehlerdetails</strong>
+          <details>
+            <summary>Stacktrace anzeigen</summary>
+            <pre style="white-space:pre-wrap;margin:8px 0 0">{{ error }}</pre>
+          </details>
+        </div>
+      {% endif %}
 
-    <div class="overflow-x-auto">
-      <table class="min-w-full text-sm">
-        <thead>
-          <tr class="text-left border-b">
-            <th class="py-3 pr-4">Name</th>
-            <th class="py-3 pr-4">Rolle</th>
-            <th class="py-3 pr-4">Credit (EUR)</th>
-            <th class="py-3 pr-4">Debit (EUR)</th>
-            <th class="py-3 pr-4">Netto (EUR)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr class="border-b hover:bg-gray-50">
-            <td class="py-2 pr-4">{{ r.name }}</td>
-            <td class="py-2 pr-4">{{ r.role }}</td>
-            <td class="py-2 pr-4">{{ '%.2f'|format(r.credit_eur|default(0)) }}</td>
-            <td class="py-2 pr-4">{{ '%.2f'|format(r.debit_eur|default(0)) }}</td>
-            <td class="py-2 pr-4 font-semibold">
-              {{ '%.2f'|format(r.net_eur|default(r.amount_eur|default(0))) }}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+      {% if kpis %}
+        <div class="grid">
+          <div class="kpi"><div class="muted">Teilnehmer</div><div style="font-weight:700;font-size:20px">{{ kpis.participants }}</div></div>
+          <div class="kpi"><div class="muted">Summe Credit</div><div style="font-weight:700;font-size:20px">€ {{ '%.2f'|format(kpis.sum_credit) }}</div></div>
+          <div class="kpi"><div class="muted">Summe Debit</div><div style="font-weight:700;font-size:20px">€ {{ '%.2f'|format(kpis.sum_debit) }}</div></div>
+          <div class="kpi"><div class="muted">Netting-Effizienz</div><div style="font-weight:700;font-size:20px">{{ '%.0f'|format(kpis.netting_efficiency * 100) }}%</div></div>
+        </div>
+      {% endif %}
 
-    <div>
-      <a href="/" class="text-blue-600 hover:underline">Zurück zur Auswahl</a>
+      <div style="overflow:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th><th>Rolle</th><th>Credit (EUR)</th><th>Debit (EUR)</th><th>Netto (EUR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr>
+                <td>{{ r.name }}</td>
+                <td>{{ r.role }}</td>
+                <td>{{ '%.2f'|format(r.credit_eur|default(0)) }}</td>
+                <td>{{ '%.2f'|format(r.debit_eur|default(0)) }}</td>
+                <td><strong>{{ '%.2f'|format(r.net_eur|default(r.amount_eur|default(0))) }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:14px">
+        <a class="link" href="/">Zurück zur Auswahl</a>
+      </div>
     </div>
   </div>
 </body>
