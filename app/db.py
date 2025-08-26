@@ -88,13 +88,66 @@ def _drop_column_if_exists(conn, table: str, column: str):
         conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
 
 
+# Füge diese Funktionen zu deiner db.py hinzu:
+
+def _enum_exists(conn, enum_name: str) -> bool:
+    """Prüft ob ein PostgreSQL Enum existiert."""
+    row = conn.execute(
+        text("""
+            SELECT 1
+            FROM pg_type
+            WHERE typname = :enum_name AND typtype = 'e'
+            LIMIT 1
+        """),
+        {"enum_name": enum_name},
+    ).first()
+    return row is not None
+
+
+def _enum_has_value(conn, enum_name: str, value: str) -> bool:
+    """Prüft ob ein Enum-Wert in einem PostgreSQL Enum existiert."""
+    row = conn.execute(
+        text("""
+            SELECT 1
+            FROM pg_enum pe
+            JOIN pg_type pt ON pe.enumtypid = pt.oid
+            WHERE pt.typname = :enum_name AND pe.enumlabel = :value
+            LIMIT 1
+        """),
+        {"enum_name": enum_name, "value": value},
+    ).first()
+    return row is not None
+
+
+def _ensure_eventtype_enum(conn):
+    """Stellt sicher, dass der eventtype Enum alle benötigten Werte hat."""
+    required_values = ['GENERATION', 'CONSUMPTION', 'GRID_FEED', 'BASE_FEE']
+    
+    if not _enum_exists(conn, 'eventtype'):
+        # Enum erstellen falls nicht vorhanden
+        values_str = "', '".join(required_values)
+        conn.execute(text(f"CREATE TYPE eventtype AS ENUM ('{values_str}')"))
+        print("Created eventtype enum with all values")
+    else:
+        # Fehlende Werte hinzufügen
+        for value in required_values:
+            if not _enum_has_value(conn, 'eventtype', value):
+                conn.execute(text(f"ALTER TYPE eventtype ADD VALUE '{value}'"))
+                print(f"Added '{value}' to eventtype enum")
+
+
+# Erweitere deine ensure_min_schema() Funktion:
 def ensure_min_schema():
     """
     Heilt Schema-Drift für PoC-Tabellen:
       - policies: body(JSON), created_at(TIMESTAMPTZ), DROP definition
       - usage_events: quantity(FLOAT), unit(VARCHAR 'kWh'), meta(JSON), timestamp(TIMESTAMPTZ)
+      - eventtype enum: stellt sicher dass alle Werte vorhanden sind
     """
     with engine.begin() as conn:
+        # ZUERST den Enum sicherstellen
+        _ensure_eventtype_enum(conn)
+        
         # policies minimal sichern
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS policies (
@@ -112,3 +165,5 @@ def ensure_min_schema():
         if not _column_exists(conn, "usage_events", "meta"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN meta JSON"))
         _add_timestamptz_column_if_missing(conn, "usage_events", "timestamp")
+
+
