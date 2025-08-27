@@ -217,9 +217,12 @@ def apply_policy_and_settle(
             participant_result[pid] = data.copy()
             participant_result[pid]['final_net'] = final_balances.get(pid, 0.0)
 
-    # Create the final result dict with stats separate
-    final_result = participant_result.copy()
-    final_result['_netting_stats'] = netting_stats
+    # Debug: Print the structure to understand what's causing the KeyError
+    print("DEBUG: participant_result keys:", list(participant_result.keys()))
+    for k, v in participant_result.items():
+        print(f"DEBUG: {k} -> {v}")
+        if not isinstance(v, dict) or 'credit' not in v:
+            print(f"WARNING: Entry {k} is missing 'credit' key or is not a dict: {type(v)}")
 
     # 5) In DB speichern (nur finale Netto-Beträge)
     batch = SettlementBatch(use_case=use_case)
@@ -238,4 +241,6 @@ def apply_policy_and_settle(
 
     db.commit()
     db.refresh(batch)
-    return batch, final_result
+    
+    # Return only participant data (no stats to avoid KeyError in main.py)
+    return batch, participant_result
