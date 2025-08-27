@@ -1,88 +1,83 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
-    <!-- Tailwind CSS CDN für einfaches Styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        inter: ['Inter', 'sans-serif'],
-                    },
-                }
-            }
-        }
-    </script>
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        /* Grundlegendes Styling für Textarea-Scrollbar */
-        textarea {
-            resize: vertical; /* Nur vertikales Resize erlauben */
-            min-height: 200px; /* Mindesthöhe für die Textarea */
-            max-height: 400px; /* Maximale Höhe für die Textarea */
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+theme: {
+extend: {
+fontFamily: {
+inter: ['Inter', 'sans-serif'],
+},
+}
+}
+}
+</script>
+<style>
+body {
+font-family: 'Inter', sans-serif;
+}
+textarea {
+resize: vertical;
+min-height: 200px;
+max-height: 400px;
+}
+</style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
-    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl space-y-6">
-        <h1 class="text-3xl font-bold text-center text-gray-900 mb-4">
-            {{ title }}
-        </h1>
+<div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-2xl space-y-6">
+<h1 class="text-3xl font-bold text-center text-gray-900 mb-4">
+Mieterstrom – Abrechnung & Policy
+</h1>
+<p class="text-center text-gray-600 mb-6">
+Lade die Lastgangdaten (CSV) hoch und sieh, wie unsere Engine die Abrechnungs-Logik als JSON-Policy verarbeitet.
+</p>
 
-        <p class="text-center text-gray-600 mb-6">
-            Lade deine CSV-Daten hoch und gib die Abrechnungs-Policy als JSON an.
-        </p>
+<form action="/process_data" method="post" enctype="multipart/form-data" class="space-y-6">
+<input type="hidden" name="case" value="{{ case }}">
 
-        <!-- Formular zum Hochladen von Dateien und Senden der Policy -->
-        <form action="/process_data" method="post" enctype="multipart/form-data" class="space-y-6">
-            <!-- Hidden-Feld für den Anwendungsfall -->
-            <input type="hidden" name="case" value="{{ case }}">
+<div>
+<label for="csv_file" class="block text-lg font-medium text-gray-700 mb-2">
+Lastgangdaten (CSV)
+</label>
+<input type="file" name="csv_file" id="csv_file" accept=".csv" required
+class="block w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300
+cursor-pointer focus:outline-none file:mr-4 file:py-2 file:px-4
+file:rounded-full file:border-0 file:text-sm file:font-semibold
+file:bg-green-50 file:text-green-700 hover:file:bg-green-100" />
+<p class="mt-2 text-sm text-gray-500" id="file_input_help">
+Erlaubte Formate: CSV.
+</p>
+</div>
 
-            <div>
-                <label for="csv_file" class="block text-lg font-medium text-gray-700 mb-2">
-                    CSV-Datei mit Nutzungsdaten
-                </label>
-                <input type="file" name="csv_file" id="csv_file" accept=".csv" required
-                       class="block w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300
-                              cursor-pointer focus:outline-none file:mr-4 file:py-2 file:px-4
-                              file:rounded-full file:border-0 file:text-sm file:font-semibold
-                              file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
-                <p class="mt-2 text-sm text-gray-500" id="file_input_help">
-                    Erlaubte Formate: CSV.
-                </p>
-            </div>
+<div>
+<label for="policy_json_str" class="block text-lg font-medium text-gray-700 mb-2">
+Abrechnungs-Policy (JSON)
+</label>
+<textarea name="policy_json_str" id="policy_json_str" rows="10" required
+class="block w-full p-3 border border-gray-300 rounded-lg shadow-sm
+focus:ring-green-500 focus:border-green-500 text-gray-800
+font-mono text-sm leading-relaxed"
+placeholder="Füge hier deine JSON-Policy ein...">{{ default_policy_json }}</textarea>
+<p class="mt-2 text-sm text-gray-500">
+Die Policy enthält die komplexen Regeln des Szenarios und kann angepasst werden.
+</p>
+</div>
 
-            <div>
-                <label for="policy_json_str" class="block text-lg font-medium text-gray-700 mb-2">
-                    Abrechnungs-Policy (JSON)
-                </label>
-                <textarea name="policy_json_str" id="policy_json_str" rows="10" required
-                          class="block w-full p-3 border border-gray-300 rounded-lg shadow-sm
-                                 focus:ring-blue-500 focus:border-blue-500 text-gray-800
-                                 font-mono text-sm leading-relaxed"
-                          placeholder="Füge hier deine JSON-Policy ein...">{{ default_policy_json }}</textarea>
-                <p class="mt-2 text-sm text-gray-500">
-                    Gültiges JSON-Format erforderlich. Die Standard-Policy kann angepasst werden.
-                </p>
-            </div>
+<button type="submit"
+class="w-full py-3 px-6 bg-green-600 text-white font-semibold rounded-lg
+shadow-md hover:bg-green-700 focus:outline-none focus:ring-2
+focus:ring-green-500 focus:ring-opacity-75 transition-colors text-lg">
+Daten verarbeiten & Policy anwenden
+</button>
+</form>
 
-            <button type="submit"
-                    class="w-full py-3 px-6 bg-purple-600 text-white font-semibold rounded-lg
-                           shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2
-                           focus:ring-purple-500 focus:ring-opacity-75 transition-colors text-lg">
-                Daten verarbeiten & Policy anwenden
-            </button>
-        </form>
-
-        <a href="/" class="block text-center mt-4 text-blue-600 hover:underline">
-            Zurück zur Anwendungsfall-Auswahl
-        </a>
-    </div>
+<a href="/" class="block text-center mt-4 text-green-600 hover:underline">
+Zurück zur Anwendungsfall-Auswahl
+</a>
+</div>
 </body>
 </html>

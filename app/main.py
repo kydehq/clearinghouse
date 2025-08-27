@@ -1,18 +1,16 @@
 # app/main.py
 from __future__ import annotations
-
 import io
 import json
 import traceback
 from pathlib import Path
-
+from typing import List
 import pandas as pd
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-
 from . import models, settle, use_cases, audit
 from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
@@ -22,17 +20,12 @@ from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
 # -----------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
-# Das static-Verzeichnis liegt jetzt im Hauptverzeichnis, nicht mehr in app
-STATIC_DIR = BASE_DIR.parent / "static" 
+STATIC_DIR = BASE_DIR.parent / "static"
 DEMO_DATA_DIR = STATIC_DIR / "demo_data"
 
 app = FastAPI(title="KYDE PoC", debug=True)
-
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-# Mount static files (CSS, JS, Demo-Daten)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
 
 # -----------------------------------------------------------------------------
 # Startup: DB Tabellen anlegen
@@ -44,11 +37,13 @@ def on_startup():
     ensure_min_schema()
     print("Startup complete.")
 
-
 # -----------------------------------------------------------------------------
 # Helper: CSV robust einlesen
 # -----------------------------------------------------------------------------
 def read_csv_robust(content: bytes) -> pd.DataFrame:
+    """
+    Versucht, CSV mit auto-Delimiter, UTF-8/BOM & Fallbacks einzulesen.
+    """
     tries = [
         dict(sep=None, engine="python", encoding="utf-8-sig"),
         dict(sep=";", encoding="utf-8-sig"),
@@ -63,10 +58,18 @@ def read_csv_robust(content: bytes) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(text), sep=None, engine="python")
 
 def to_float_safe(x) -> float:
-    if x is None: return 0.0
-    if isinstance(x, (int, float)): return float(x)
-    s = str(x).strip().replace(",", ".")
-    if not s: return 0.0
+    """
+    Konvertiert Strings mit Komma als Dezimaltrenner nach float.
+    Leere/ungültige Werte -> 0.0
+    """
+    if x is None:
+        return 0.0
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).strip()
+    if not s:
+        return 0.0
+    s = s.replace(",", ".")
     try:
         return float(s)
     except (ValueError, TypeError):
@@ -83,13 +86,13 @@ def case_selector(request: Request):
     )
 
 @app.get("/upload", response_class=HTMLResponse)
-def upload_page(request: Request, case: str = "energy_community"):
-    try:
-        default_policy = use_cases.get_default_policy(case)
-        title = use_cases.get_use_case_title(case)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+def upload_page(request: Request, case: str = "mieterstrom"):
+    if case not in ("mieterstrom"):
+        raise HTTPException(status_code=400, detail="Unknown case, only 'mieterstrom' is supported for this demo.")
+    
+    default_policy = use_cases.get_default_policy(case)
+    title = use_cases.get_use_case_title(case)
+    
     return templates.TemplateResponse(
         "uploads.html",
         {
@@ -109,17 +112,20 @@ async def process_data(
     policy_json_str: str = Form(...),
 ):
     try:
-        # 1. Policy validieren und speichern
         policy_body = json.loads(policy_json_str)
         policy = Policy(use_case=case, body=policy_body)
         db.add(policy)
         db.commit()
 
-        # 2. CSV einlesen und verarbeiten
         content = await csv_file.read()
         df = read_csv_robust(content)
         
-        # 3. Teilnehmer und Events in DB anlegen
+        # --- FEHLERBEHEBUNG: Spaltennamen-Check ---
+        required_cols = ["participant_id", "participant_name", "role", "event_type", "quantity"]
+        if not all(col in df.columns for col in required_cols):
+            missing = [col for col in required_cols if col not in df.columns]
+            raise ValueError(f"Fehlende Spalten in der CSV-Datei: {', '.join(missing)}")
+        
         participants = {}
         usage_events = []
         for _, row in df.iterrows():
@@ -147,14 +153,14 @@ async def process_data(
         db.add_all(usage_events)
         db.commit()
         
-        # 4. Settlement-Logik anwenden
         batch, result_data = settle.apply_policy_and_settle(db, case, policy_body, usage_events)
         
-        # 5. KPIs und Ergebnis-Daten für das Template aufbereiten
         rows = []
         sum_credit, sum_debit = 0.0, 0.0
         for pid, data in result_data.items():
             participant = db.query(Participant).get(pid)
+            if not participant: continue 
+            
             credit = data.get('credit', 0.0)
             debit = data.get('debit', 0.0)
             rows.append({
@@ -188,7 +194,6 @@ async def process_data(
             },
         )
     except Exception as e:
-        # Bei Fehlern eine detaillierte Fehlerseite anzeigen
         error_details = traceback.format_exc()
         return templates.TemplateResponse(
             "results.html",
