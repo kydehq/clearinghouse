@@ -145,6 +145,11 @@
             </details>
         </div>
         {% else %}
+        <p class="text-gray-700 mb-8 text-center">
+            Unsere Engine transformiert hochfrequente Lastgangdaten in einen transparenten, auditierbaren Finanzreport.
+            Sehen Sie links die komplexen Rohdaten und rechts das vereinfachte, genettete Ergebnis, das Ihre Abrechnung automatisiert.
+        </p>
+        
         <div class="kpi-grid">
             <div class="kpi-card">
                 <div class="kpi-label">Abrechnungs-Volumen</div>
@@ -177,7 +182,7 @@
                         <thead>
                             <tr>
                                 <th class="whitespace-nowrap">Zeitpunkt</th>
-                                <th class="whitespace-nowrap">ID</th>
+                                <th class="whitespace-nowrap">Teilnehmer</th>
                                 <th class="whitespace-nowrap">Typ</th>
                                 <th class="whitespace-nowrap">Menge</th>
                                 <th class="whitespace-nowrap">Quelle</th>
@@ -188,7 +193,7 @@
                             {% for event in events_sample %}
                             <tr>
                                 <td class="whitespace-nowrap">{{ event.timestamp | default('N/A') }}</td>
-                                <td class="whitespace-nowrap">{{ event.participant.external_id | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ event.participant.name | default('N/A') }}</td>
                                 <td class="whitespace-nowrap">{{ event.event_type.value | default('N/A') }}</td>
                                 <td class="whitespace-nowrap">{{ '%.2f'|format(event.quantity) }}</td>
                                 <td class="whitespace-nowrap">{{ event.meta.source | default('N/A') }}</td>
