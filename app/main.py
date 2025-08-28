@@ -1,10 +1,8 @@
-# app/main.py
 from __future__ import annotations
 import io
 import json
 import traceback
 from pathlib import Path
-from typing import List
 import pandas as pd
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -120,8 +118,7 @@ async def process_data(
         content = await csv_file.read()
         df = read_csv_robust(content)
         
-        # --- FEHLERBEHEBUNG: Spaltennamen-Check ---
-        required_cols = ["participant_id", "participant_name", "role", "event_type", "quantity"]
+        required_cols = ["timestamp", "participant_id", "participant_name", "role", "event_type", "quantity", "source"]
         if not all(col in df.columns for col in required_cols):
             missing = [col for col in required_cols if col not in df.columns]
             raise ValueError(f"Fehlende Spalten in der CSV-Datei: {', '.join(missing)}")
@@ -147,6 +144,11 @@ async def process_data(
                 event_type=EventType(str(row["event_type"]).strip().lower()),
                 quantity=to_float_safe(row["quantity"]),
                 unit=row.get("unit", "kWh"),
+                timestamp=row["timestamp"],
+                meta={
+                    "source": str(row["source"]).strip().lower(),
+                    "price_eur_per_kwh": to_float_safe(row.get("price_eur_per_kwh", 0.0))
+                }
             )
             usage_events.append(event)
         
