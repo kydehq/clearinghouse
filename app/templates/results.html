@@ -224,6 +224,13 @@
                 <p class="text-gray-600 mb-4">
                     Ein transparenter, auditierbarer und genetteter Report für alle Parteien – in Millisekunden erstellt.
                 </p>
+                {% if netting_explanations %}
+                    <div class="space-y-4 mb-6 text-sm text-gray-700">
+                    {% for explanation in netting_explanations %}
+                        <p>{{ explanation|safe }}</p>
+                    {% endfor %}
+                    </div>
+                {% endif %}
                 <div class="overflow-x-auto bg-white rounded-lg shadow-md border border-gray-200" style="max-height: 400px;">
                     <table class="min-w-full text-sm">
                         <thead>
