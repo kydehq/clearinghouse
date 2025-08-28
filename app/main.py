@@ -9,11 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
-
+from . import use_cases
 from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
 from .settle import apply_policy_and_settle
-from . import use_cases
 from typing import List
 
 # -----------------------------------------------------------------------------
@@ -181,7 +180,7 @@ async def process_data(
         
         events_sample_with_participants.sort(key=lambda x: x.timestamp)
 
-        batch, result_data = settle.apply_policy_and_settle(db, case, policy_body, usage_events)
+        batch, result_data = apply_policy_and_settle(db, case, policy_body, usage_events)
         
         rows = []
         sum_credit, sum_debit = 0.0, 0.0
