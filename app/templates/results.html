@@ -4,102 +4,261 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>{{ title }}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                fontFamily: {
+                    inter: ['Inter', 'sans-serif'],
+                },
+                colors: {
+                    kydeDarkBlue: '#1a202c',
+                    kydeBlue: '#2c5282',
+                    kydeGreen: '#38a169',
+                    kydeLightGray: '#edf2f7',
+                }
+            }
+        }
+    }
+</script>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--muted:#6b7280;--text:#0f172a;--ok:#14532d;--warn:#92400e;--err:#7f1d1d;--line:#e5e7eb}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu}
-.wrap{max-width:1100px;margin:32px auto;padding:16px}
-.card{background:var(--card);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.06);padding:24px}
-h1{margin:0 0 16px;font-size:28px}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:10px 0 16px}
-.kpi{background:#f3f4f6;border-radius:12px;padding:12px}
-.muted{color:var(--muted);font-size:13px}
-table{width:100%;border-collapse:collapse;margin-top:8px}
-th,td{padding:10px 12px;text-align:left}
-thead th{border-bottom:1px solid var(--line);font-weight:600}
-tbody tr{border-bottom:1px solid var(--line)}
-tbody tr:hover{background:#f9fafb}
-.btn{display:inline-block;background:#111827;color:#fff;padding:8px 12px;border-radius:10px;text-decoration:none;font-size:14px}
-.link{color:#2563eb;text-decoration:none}
-.link:hover{text-decoration:underline}
-.alert{border-radius:12px;padding:12px;margin:12px 0}
-.info{background:#fef9c3;color:var(--warn)}
-.error{background:#fee2e2;color:var(--err);white-space:pre-wrap}
-details{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:10px 14px;margin-top:8px}
-summary{cursor:pointer;font-weight:600}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:13px}
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f6f7f9; /* kydeLightGray */
+        color: #0f172a; /* kydeDarkBlue */
+    }
+    .card {
+        background-color: #fff;
+        border-radius: 1rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,.06);
+        padding: 1.5rem;
+    }
+    h1 {
+        font-size: 1.75rem; /* text-3xl */
+        font-weight: 700; /* font-bold */
+        margin-bottom: 1rem;
+    }
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-top: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    .kpi-card {
+        background-color: #f3f4f6; /* gray-100 */
+        border-radius: 0.75rem; /* rounded-xl */
+        padding: 1rem;
+        text-align: center;
+    }
+    .kpi-label {
+        color: #6b7280; /* gray-600 */
+        font-size: 0.875rem; /* text-sm */
+    }
+    .kpi-value {
+        font-weight: 700; /* font-bold */
+        font-size: 1.5rem; /* text-2xl */
+        margin-top: 0.25rem;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+    }
+    th, td {
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid #e5e7eb; /* gray-200 */
+    }
+    thead th {
+        font-weight: 600; /* font-semibold */
+        background-color: #f9fafb; /* gray-50 */
+    }
+    tbody tr:hover {
+        background-color: #f3f4f6; /* gray-100 */
+    }
+    .btn {
+        display: inline-block;
+        background-color: #1f2937; /* gray-800 */
+        color: #fff;
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        text-decoration: none;
+        font-size: 0.875rem; /* text-sm */
+        font-weight: 500;
+        transition: background-color 0.2s;
+    }
+    .btn:hover {
+        background-color: #374151; /* gray-700 */
+    }
+    .link {
+        color: #2563eb; /* blue-600 */
+        text-decoration: none;
+    }
+    .link:hover {
+        text-decoration: underline;
+    }
+    .error {
+        background-color: #fee2e2; /* red-100 */
+        color: #991b1b; /* red-800 */
+        padding: 1rem;
+        border-radius: 0.75rem;
+        margin-top: 1rem;
+        white-space: pre-wrap;
+    }
+    details {
+        background-color: #fff7ed; /* orange-50 */
+        border: 1px solid #fed7aa; /* orange-200 */
+        border-radius: 0.75rem;
+        padding: 0.75rem 1rem;
+        margin-top: 0.5rem;
+    }
+    summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #9a3412; /* orange-800 */
+    }
+    pre {
+        margin-top: 0.5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.875rem;
+    }
 </style>
 </head>
 <body>
-<div class="wrap">
-<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-<h1>{{ title }}</h1>
-{% if batch_id %}
-<a class="btn" href="/audit?batch_id={{ batch_id }}">Audit-Ansicht</a>
-{% endif %}
-</div>
-{% if message %}
-<div class="alert info">{{ message }}</div>
-{% endif %}
-{% if error %}
-<div class="alert error">
-<strong>Fehlerdetails</strong>
-<details>
-<summary>Stacktrace anzeigen</summary>
-<pre style="white-space:pre-wrap;margin:8px 0 0">{{ error }}</pre>
-</details>
-</div>
-{% endif %}
+<div class="max-w-7xl mx-auto py-8 px-4">
+    <div class="card">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-kydeDarkBlue">Ergebnis: Mieterstrom</h1>
+            {% if batch_id %}
+            <a class="btn" href="/audit?batch_id={{ batch_id }}">Audit-Ansicht</a>
+            {% endif %}
+        </div>
 
-{% if kpis %}
-<div class="grid">
-<div class="kpi">
-<div class="muted">Abrechnungs-Volumen</div>
-<div style="font-weight:700;font-size:20px">€ {{ '%.2f'|format(kpis.sum_credit + kpis.sum_debit) }}</div>
-</div>
-<div class="kpi">
-<div class="muted">Benötigte Transaktionen</div>
-<div style="font-weight:700;font-size:20px">€ {{ '%.2f'|format(kpis.sum_debit) }}</div>
-</div>
-<div class="kpi">
-<div class="muted">Netting-Effizienz</div>
-<div style="font-weight:700;font-size:20px">{{ '%.0f'|format(kpis.netting_efficiency * 100) }}%</div>
-</div>
-<div class="kpi">
-<div class="muted">Beteiligte Parteien</div>
-<div style="font-weight:700;font-size:20px">{{ kpis.participants }}</div>
-</div>
-</div>
-{% endif %}
-<div style="overflow:auto">
-<table>
-<thead>
-<tr>
-<th>Name</th><th>Rolle</th><th>Soll (EUR)</th><th>Haben (EUR)</th><th>Netto-Saldo (EUR)</th>
-</tr>
-</thead>
-<tbody>
-{% for r in rows %}
-<tr>
-<td>{{ r.name }}</td>
-<td>{{ r.role }}</td>
-<td>{{ '%.2f'|format(r.debit_eur|default(0)) }}</td>
-<td>{{ '%.2f'|format(r.credit_eur|default(0)) }}</td>
-<td><strong>{{ '%.2f'|format(r.net_eur|default(r.amount_eur|default(0))) }}</strong></td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-</div>
-<div style="margin-top:14px">
-<p class="muted" style="font-style: italic; margin-bottom: 8px;">
-Dieser Report wurde in Millisekunden von KYDE erstellt.
-</p>
-<p class="muted">
-<a class="link" href="/">Zurück zur Auswahl</a>
-</p>
-</div>
-</div>
+        {% if error %}
+        <div class="error">
+            <strong>Verarbeitung fehlgeschlagen:</strong>
+            <details>
+                <summary>Details anzeigen</summary>
+                <pre>{{ error }}</pre>
+            </details>
+        </div>
+        {% else %}
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Abrechnungs-Volumen</div>
+                <div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_credit + kpis.sum_debit) }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Benötigte Transaktionen</div>
+                <div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_debit) }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Netting-Effizienz</div>
+                <div class="kpi-value">{{ '%.0f'|format(kpis.netting_efficiency * 100) }}%</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Beteiligte Parteien</div>
+                <div class="kpi-value">{{ kpis.participants }}</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">
+                    Rohdaten: Das manuelle Problem
+                </h2>
+                <p class="text-gray-600 mb-4">
+                    Tausende von stündlichen Messpunkten, dynamische Preise und variable Quellen machen eine manuelle Abrechnung unmöglich und fehleranfällig.
+                </p>
+                <div class="overflow-x-auto bg-gray-50 rounded-lg shadow-inner border border-gray-200" style="max-height: 400px;">
+                    <table class="min-w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th class="whitespace-nowrap">Zeitpunkt</th>
+                                <th class="whitespace-nowrap">ID</th>
+                                <th class="whitespace-nowrap">Typ</th>
+                                <th class="whitespace-nowrap">Menge</th>
+                                <th class="whitespace-nowrap">Quelle</th>
+                                <th class="whitespace-nowrap">Preis (€/kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event in events_sample %} {# events_sample muss noch in main.py übergeben werden! #}
+                            <tr>
+                                <td class="whitespace-nowrap">{{ event.timestamp | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ event.participant.external_id | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ event.event_type.value | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ '%.2f'|format(event.quantity) }}</td>
+                                <td class="whitespace-nowrap">{{ event.meta.source | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ '%.3f'|format(event.meta.price_eur_per_kwh) | default('N/A') }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-gray-500 py-4">
+                                    <p>Keine Rohdaten verfügbar oder die CSV-Datei war leer.</p>
+                                    <p>Bitte stellen Sie sicher, dass die CSV-Datei Events enthält.</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">
+                    *Dies ist ein Auszug der ersten {{ events_sample | length }} Zeilen der hochgeladenen Daten.
+                </p>
+            </div>
+
+            <div>
+                <h2 class="text-2xl font-bold text-kydeGreen mb-4">
+                    KYDE-Settlement: Die automatisierte Lösung
+                </h2>
+                <p class="text-gray-600 mb-4">
+                    Ein transparenter, auditierbarer und genetteter Report für alle Parteien – in Millisekunden erstellt.
+                </p>
+                <div class="overflow-x-auto bg-white rounded-lg shadow-md border border-gray-200" style="max-height: 400px;">
+                    <table class="min-w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th class="whitespace-nowrap">Name</th>
+                                <th class="whitespace-nowrap">Rolle</th>
+                                <th class="whitespace-nowrap">Soll (€)</th>
+                                <th class="whitespace-nowrap">Haben (€)</th>
+                                <th class="whitespace-nowrap">Netto-Saldo (€)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in rows %}
+                            <tr>
+                                <td class="whitespace-nowrap">{{ r.name }}</td>
+                                <td class="whitespace-nowrap">{{ r.role }}</td>
+                                <td class="whitespace-nowrap">{{ '%.2f'|format(r.debit_eur|default(0)) }}</td>
+                                <td class="whitespace-nowrap">{{ '%.2f'|format(r.credit_eur|default(0)) }}</td>
+                                <td class="whitespace-nowrap font-bold {% if r.net_eur > 0 %}text-green-700{% elif r.net_eur < 0 %}text-red-700{% endif %}">
+                                    {{ '%.2f'|format(r.net_eur|default(0)) }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 text-center">
+            <p class="text-lg font-semibold text-kydeDarkBlue mb-2">
+                Wie lange würde Ihre Fachabteilung benötigen, um diesen Report manuell und fehlerfrei für nur dieses eine Haus zu erstellen?
+            </p>
+            <p class="text-xl font-bold text-kydeGreen mb-4">
+                Wir liefern das Ergebnis in Millisekunden – audit-sicher und sofort skalierbar.
+            </p>
+            <a href="/" class="link text-lg">
+                Zurück zur Auswahl
+            </a>
+        </div>
+        {% endif %}
+    </div>
 </div>
 </body>
 </html>

@@ -184,6 +184,9 @@ async def process_data(
             'sum_debit': sum_debit,
             'netting_efficiency': (1 - (net_flow / total_flow)) if total_flow > 0 else 0
         }
+        events_sample = usage_events[:10] # Zeigt die ersten 10 Events an
+        if len(usage_events) > 10:
+            events_sample.append(None)
 
         return templates.TemplateResponse(
             "results.html",
@@ -193,6 +196,7 @@ async def process_data(
                 "batch_id": batch.id,
                 "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
                 "kpis": kpis,
+                "events_sample": events_sample, # <--- DIESE ZEILE HINZUFÜGEN
             },
         )
     except Exception as e:
