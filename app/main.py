@@ -206,6 +206,35 @@ async def process_data(
         # Konvertiere das DataFrame in eine Liste von Dictionaries für das Template
         df_for_template = df.to_dict('records')
 
+        # Generiere die Erklärungen für jeden Teilnehmer
+        netting_explanations = []
+        for r in rows:
+            name = r['name']
+            role = r['role']
+            net = r['net_eur']
+            debit = r['debit_eur']
+            credit = r['credit_eur']
+
+            if role == 'tenant':
+                explanation = f"**{name}** zahlt die Gesamtkosten für seinen Verbrauch und die Grundgebühren in Höhe von {debit:.2f} €."
+            elif role == 'landlord':
+                explanation = f"**{name}** erhält Einnahmen aus dem Verkauf des überschüssigen Stroms ins öffentliche Netz und eine Einnahmenbeteiligung von {credit:.2f} € aus den Mieterzahlungen."
+            elif role == 'operator':
+                explanation = f"**{name}** erhält die Gebühr von den Mieterzahlungen, die sich auf {credit:.2f} € beläuft."
+            else:
+                explanation = f"Für **{name}** wurde eine Gutschrift von {credit:.2f} € und eine Forderung von {debit:.2f} € festgestellt, was zu einem Netto-Saldo von {net:.2f} € führt."
+            
+            if net > 0:
+                final_status = "erhält eine Auszahlung"
+            elif net < 0:
+                final_status = "hat eine Forderung zu begleichen"
+            else:
+                final_status = "hat keinen offenen Saldo"
+
+            explanation += f" Nach dem Netting {final_status} in Höhe von {abs(net):.2f} €."
+            netting_explanations.append(explanation)
+
+
         return templates.TemplateResponse(
             "results.html",
             {
@@ -215,6 +244,7 @@ async def process_data(
                 "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
                 "kpis": kpis,
                 "events_raw_data": df_for_template, # <-- Die Rohdaten werden jetzt hier übergeben
+                "netting_explanations": netting_explanations # <-- Die Erklärungen werden hier übergeben
             },
         )
     except Exception as e:
