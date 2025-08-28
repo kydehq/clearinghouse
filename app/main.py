@@ -130,7 +130,6 @@ async def process_data(
         df['source'] = df['source'].str.strip().str.lower()
         
         unique_participants = df[['participant_id', 'participant_name', 'role']].drop_duplicates()
-        # Korrektur: Nutze 'Participant' direkt, da es importiert ist
         existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_participants['participant_id'])).all()}
         
         new_participants = []
