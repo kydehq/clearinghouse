@@ -88,7 +88,7 @@ def apply_policy_and_settle(
             if p.role == ParticipantRole.TENANT:
                 if ev.event_type == EventType.CONSUMPTION:
                     # Preis aus Metadaten oder Policy nehmen
-                    price = ev.meta.get('price_eur_per_kwh', 0.0) # Preis aus CSV nehmen
+                    price = ev.meta.get('price_eur_per_kwh', 0.0)
                     cost = ev.quantity * price
                     result[p.id]['debit'] += cost
                     total_tenant_payments += cost

@@ -185,7 +185,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for event in events_sample %} {# events_sample muss noch in main.py übergeben werden! #}
+                            {% for event in events_sample %}
                             <tr>
                                 <td class="whitespace-nowrap">{{ event.timestamp | default('N/A') }}</td>
                                 <td class="whitespace-nowrap">{{ event.participant.external_id | default('N/A') }}</td>
@@ -202,6 +202,13 @@
                                 </td>
                             </tr>
                             {% endfor %}
+                            {% if has_more_data %}
+                            <tr>
+                                <td colspan="6" class="text-center text-gray-500 py-2 italic">
+                                    ... weitere {{ (usage_events | length) - (events_sample | length) }} Einträge
+                                </td>
+                            </tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>

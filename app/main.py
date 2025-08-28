@@ -8,10 +8,12 @@ from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPExcep
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-from . import models, settle, use_cases, audit
+from sqlalchemy.orm import Session, joinedload
 from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
+from .settle import apply_policy_and_settle
+from . import use_cases
+from typing import List
 
 # -----------------------------------------------------------------------------
 # App & Templates/Static
@@ -123,30 +125,46 @@ async def process_data(
             missing = [col for col in required_cols if col not in df.columns]
             raise ValueError(f"Fehlende Spalten in der CSV-Datei: {', '.join(missing)}")
         
-        participants = {}
+        df['role'] = df['role'].str.strip().str.lower()
+        df['event_type'] = df['event_type'].str.strip().str.lower()
+        df['source'] = df['source'].str.strip().str.lower()
+        
+        unique_participants = df[['participant_id', 'participant_name', 'role']].drop_duplicates()
+        existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_participants['participant_id'])).all()}
+        
+        new_participants = []
+        participant_map = {}
+        for _, row in unique_participants.iterrows():
+            ext_id = str(row['participant_id'])
+            if ext_id not in existing_participants:
+                p = Participant(
+                    external_id=ext_id,
+                    name=row.get("participant_name", f"Participant {ext_id}"),
+                    role=ParticipantRole(row["role"]),
+                )
+                new_participants.append(p)
+                participant_map[ext_id] = p
+            else:
+                participant_map[ext_id] = existing_participants[ext_id]
+        
+        if new_participants:
+            db.add_all(new_participants)
+            db.flush()
+            db.commit()
+
         usage_events = []
         for _, row in df.iterrows():
-            ext_id = str(row["participant_id"]).strip()
-            if ext_id not in participants:
-                p = db.query(Participant).filter_by(external_id=ext_id).first()
-                if not p:
-                    p = Participant(
-                        external_id=ext_id,
-                        name=row.get("participant_name", f"Participant {ext_id}"),
-                        role=ParticipantRole(str(row["role"]).strip().lower()),
-                    )
-                    db.add(p)
-                    db.flush()
-                participants[ext_id] = p
+            ext_id = str(row['participant_id'])
+            p_id = participant_map[ext_id].id
             
             event = UsageEvent(
-                participant_id=participants[ext_id].id,
-                event_type=EventType(str(row["event_type"]).strip().lower()),
+                participant_id=p_id,
+                event_type=EventType(row["event_type"]),
                 quantity=to_float_safe(row["quantity"]),
                 unit=row.get("unit", "kWh"),
                 timestamp=row["timestamp"],
                 meta={
-                    "source": str(row["source"]).strip().lower(),
+                    "source": row["source"],
                     "price_eur_per_kwh": to_float_safe(row.get("price_eur_per_kwh", 0.0))
                 }
             )
@@ -155,6 +173,13 @@ async def process_data(
         db.add_all(usage_events)
         db.commit()
         
+        sample_event_ids = [ev.id for ev in usage_events[:10]]
+        events_sample_with_participants = db.query(UsageEvent).options(
+            joinedload(UsageEvent.participant)
+        ).filter(UsageEvent.id.in_(sample_event_ids)).all()
+        
+        events_sample_with_participants.sort(key=lambda x: x.timestamp)
+
         batch, result_data = settle.apply_policy_and_settle(db, case, policy_body, usage_events)
         
         rows = []
@@ -184,9 +209,6 @@ async def process_data(
             'sum_debit': sum_debit,
             'netting_efficiency': (1 - (net_flow / total_flow)) if total_flow > 0 else 0
         }
-        events_sample = usage_events[:10] # Zeigt die ersten 10 Events an
-        if len(usage_events) > 10:
-            events_sample.append(None)
 
         return templates.TemplateResponse(
             "results.html",
@@ -196,7 +218,8 @@ async def process_data(
                 "batch_id": batch.id,
                 "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
                 "kpis": kpis,
-                "events_sample": events_sample, # <--- DIESE ZEILE HINZUFÜGEN
+                "events_sample": events_sample_with_participants,
+                "has_more_data": len(usage_events) > 10,
             },
         )
     except Exception as e:
