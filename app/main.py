@@ -130,46 +130,53 @@ async def process_data(
         df['source'] = df['source'].str.strip().str.lower()
         
         unique_participants = df[['participant_id', 'participant_name', 'role']].drop_duplicates()
-        existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_participants['participant_id'])).all()}
         
-        new_participants = []
-        participant_map = {}
-        for _, row in unique_participants.iterrows():
+        # Holen Sie alle Teilnehmer, die in der CSV vorkommen, aus der DB
+        unique_ids = [str(uid) for uid in unique_participants['participant_id'].unique()]
+        existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_ids)).all()}
+        
+        new_participants_list = []
+        participant_map_dict = {}
+
+        for index, row in unique_participants.iterrows():
             ext_id = str(row['participant_id'])
             name_from_csv = row.get("participant_name", f"Participant {ext_id}")
             role_from_csv = ParticipantRole(row["role"])
-
-            if ext_id in existing_participants:
-                p = existing_participants[ext_id]
-                # Aktualisiere den Namen und die Rolle, falls sie sich geändert haben
+            
+            p = existing_participants.get(ext_id)
+            if p:
+                # Synchronisiere den Namen und die Rolle aus der CSV
                 if p.name != name_from_csv:
                     p.name = name_from_csv
                     db.add(p)
                 if p.role != role_from_csv:
                     p.role = role_from_csv
                     db.add(p)
-                participant_map[ext_id] = p
             else:
                 p = Participant(
                     external_id=ext_id,
                     name=name_from_csv,
-                    role=role_from_csv,
+                    role=role_from_csv
                 )
-                new_participants.append(p)
-                participant_map[ext_id] = p
+                new_participants_list.append(p)
+            
+            participant_map_dict[ext_id] = p
         
-        if new_participants:
-            db.add_all(new_participants)
-        db.flush()
-        db.commit()
-
+        if new_participants_list:
+            db.add_all(new_participants_list)
+        
+        db.flush() # Nötig, um IDs für neue Teilnehmer zu erhalten
+        
+        # Nun können wir die Events hinzufügen, da alle Teilnehmer-IDs bekannt sind
         usage_events = []
         for _, row in df.iterrows():
             ext_id = str(row['participant_id'])
-            p_id = participant_map[ext_id].id
-            
+            p = participant_map_dict.get(ext_id)
+            if not p:
+                raise HTTPException(status_code=500, detail=f"Teilnehmer mit ID {ext_id} nicht in der Datenbank gefunden.")
+
             event = UsageEvent(
-                participant_id=p_id,
+                participant_id=p.id,
                 event_type=EventType(row["event_type"]),
                 quantity=to_float_safe(row["quantity"]),
                 unit=row.get("unit", "kWh"),
@@ -184,19 +191,22 @@ async def process_data(
         db.add_all(usage_events)
         db.commit()
         
+        # Netting-Algorithmus ausführen
         batch, result_data = apply_policy_and_settle(db, case, policy_body, usage_events)
         
         rows = []
         sum_credit, sum_debit = 0.0, 0.0
+        # ÄNDERUNG: Nutze die participant_map_dict, um den korrekten Namen zu erhalten
         for pid, data in result_data.items():
-            participant = db.query(Participant).get(pid)
-            if not participant: continue 
-            
+            # Finde den Teilnehmer direkt über die externe ID, um den aktuellen Namen zu erhalten
+            participant_from_csv = next((p for p in participant_map_dict.values() if p.id == pid), None)
+            if not participant_from_csv: continue
+
             credit = data.get('credit', 0.0)
             debit = data.get('debit', 0.0)
             rows.append({
-                "name": participant.name,
-                "role": participant.role.value,
+                "name": participant_from_csv.name,
+                "role": participant_from_csv.role.value,
                 "credit_eur": credit,
                 "debit_eur": debit,
                 "net_eur": data.get('final_net', credit - debit)
@@ -214,13 +224,9 @@ async def process_data(
             'netting_efficiency': (1 - (net_flow / total_flow)) if total_flow > 0 else 0
         }
 
-        # Konvertiere das DataFrame in eine Liste von Dictionaries für das Template
         df_for_template = df.to_dict('records')
 
-        # Generiere die Erklärungen für jeden Teilnehmer
         netting_explanations = []
-        
-        # Generiere eine Zusammenfassung für jede Partei
         for r in rows:
             name = r['name']
             role = r['role']
@@ -257,8 +263,8 @@ async def process_data(
                 "batch_id": batch.id,
                 "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
                 "kpis": kpis,
-                "events_raw_data": df_for_template, # <-- Die Rohdaten werden jetzt hier übergeben
-                "netting_explanations": netting_explanations # <-- Die Erklärungen werden hier übergeben
+                "events_raw_data": df_for_template, 
+                "netting_explanations": netting_explanations
             },
         )
     except Exception as e:
