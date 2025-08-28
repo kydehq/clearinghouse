@@ -130,27 +130,38 @@ async def process_data(
         df['source'] = df['source'].str.strip().str.lower()
         
         unique_participants = df[['participant_id', 'participant_name', 'role']].drop_duplicates()
-        existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_participants['participant_id'])).all()}
+        existing_participants = {p.external_id: p for p in db.query(models.Participant).filter(models.Participant.external_id.in_(unique_participants['participant_id'])).all()}
         
         new_participants = []
         participant_map = {}
         for _, row in unique_participants.iterrows():
             ext_id = str(row['participant_id'])
-            if ext_id not in existing_participants:
+            name_from_csv = row.get("participant_name", f"Participant {ext_id}")
+            role_from_csv = ParticipantRole(row["role"])
+
+            if ext_id in existing_participants:
+                p = existing_participants[ext_id]
+                # Aktualisiere den Namen und die Rolle, falls sie sich geändert haben
+                if p.name != name_from_csv:
+                    p.name = name_from_csv
+                    db.add(p)
+                if p.role != role_from_csv:
+                    p.role = role_from_csv
+                    db.add(p)
+                participant_map[ext_id] = p
+            else:
                 p = Participant(
                     external_id=ext_id,
-                    name=row.get("participant_name", f"Participant {ext_id}"),
-                    role=ParticipantRole(row["role"]),
+                    name=name_from_csv,
+                    role=role_from_csv,
                 )
                 new_participants.append(p)
                 participant_map[ext_id] = p
-            else:
-                participant_map[ext_id] = existing_participants[ext_id]
         
         if new_participants:
             db.add_all(new_participants)
-            db.flush()
-            db.commit()
+        db.flush()
+        db.commit()
 
         usage_events = []
         for _, row in df.iterrows():
