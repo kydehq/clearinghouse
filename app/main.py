@@ -173,13 +173,6 @@ async def process_data(
         db.add_all(usage_events)
         db.commit()
         
-        sample_event_ids = [ev.id for ev in usage_events[:10]]
-        events_sample_with_participants = db.query(UsageEvent).options(
-            joinedload(UsageEvent.participant)
-        ).filter(UsageEvent.id.in_(sample_event_ids)).all()
-        
-        events_sample_with_participants.sort(key=lambda x: x.timestamp)
-
         batch, result_data = apply_policy_and_settle(db, case, policy_body, usage_events)
         
         rows = []
@@ -210,6 +203,9 @@ async def process_data(
             'netting_efficiency': (1 - (net_flow / total_flow)) if total_flow > 0 else 0
         }
 
+        # Konvertiere das DataFrame in eine Liste von Dictionaries für das Template
+        df_for_template = df.to_dict('records')
+
         return templates.TemplateResponse(
             "results.html",
             {
@@ -218,8 +214,7 @@ async def process_data(
                 "batch_id": batch.id,
                 "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
                 "kpis": kpis,
-                "events_sample": events_sample_with_participants,
-                "has_more_data": len(usage_events) > 10,
+                "events_raw_data": df_for_template, # <-- Die Rohdaten werden jetzt hier übergeben
             },
         )
     except Exception as e:

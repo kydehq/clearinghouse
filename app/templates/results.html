@@ -183,6 +183,7 @@
                             <tr>
                                 <th class="whitespace-nowrap">Zeitpunkt</th>
                                 <th class="whitespace-nowrap">Teilnehmer</th>
+                                <th class="whitespace-nowrap">Rolle</th>
                                 <th class="whitespace-nowrap">Typ</th>
                                 <th class="whitespace-nowrap">Menge</th>
                                 <th class="whitespace-nowrap">Quelle</th>
@@ -190,35 +191,29 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for event in events_sample %}
+                            {% for event in events_raw_data %}
                             <tr>
-                                <td class="whitespace-nowrap">{{ event.timestamp | default('N/A') }}</td>
-                                <td class="whitespace-nowrap">{{ event.participant.name | default('N/A') }}</td>
-                                <td class="whitespace-nowrap">{{ event.event_type.value | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ event.timestamp }}</td>
+                                <td class="whitespace-nowrap">{{ event.participant_name }}</td>
+                                <td class="whitespace-nowrap">{{ event.role }}</td>
+                                <td class="whitespace-nowrap">{{ event.event_type }}</td>
                                 <td class="whitespace-nowrap">{{ '%.2f'|format(event.quantity) }}</td>
-                                <td class="whitespace-nowrap">{{ event.meta.source | default('N/A') }}</td>
-                                <td class="whitespace-nowrap">{{ '%.3f'|format(event.meta.price_eur_per_kwh) | default('N/A') }}</td>
+                                <td class="whitespace-nowrap">{{ event.source }}</td>
+                                <td class="whitespace-nowrap">{{ '%.3f'|format(event.price_eur_per_kwh|default(0)) }}</td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="6" class="text-center text-gray-500 py-4">
+                                <td colspan="7" class="text-center text-gray-500 py-4">
                                     <p>Keine Rohdaten verfügbar oder die CSV-Datei war leer.</p>
                                     <p>Bitte stellen Sie sicher, dass die CSV-Datei Events enthält.</p>
                                 </td>
                             </tr>
                             {% endfor %}
-                            {% if has_more_data %}
-                            <tr>
-                                <td colspan="6" class="text-center text-gray-500 py-2 italic">
-                                    ... weitere {{ (usage_events | length) - (events_sample | length) }} Einträge
-                                </td>
-                            </tr>
-                            {% endif %}
                         </tbody>
                     </table>
                 </div>
                 <p class="text-sm text-gray-500 mt-2">
-                    *Dies ist ein Auszug der ersten {{ events_sample | length }} Zeilen der hochgeladenen Daten.
+                    *Dies ist ein Auszug der ersten {{ events_raw_data | length }} Zeilen der hochgeladenen Daten.
                 </p>
             </div>
 
