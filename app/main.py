@@ -208,6 +208,8 @@ async def process_data(
 
         # Generiere die Erklärungen für jeden Teilnehmer
         netting_explanations = []
+        
+        # Generiere eine Zusammenfassung für jede Partei
         for r in rows:
             name = r['name']
             role = r['role']
@@ -215,23 +217,24 @@ async def process_data(
             debit = r['debit_eur']
             credit = r['credit_eur']
 
-            if role == 'tenant':
-                explanation = f"**{name}** zahlt die Gesamtkosten für seinen Verbrauch und die Grundgebühren in Höhe von {debit:.2f} €."
-            elif role == 'landlord':
-                explanation = f"**{name}** erhält Einnahmen aus dem Verkauf des überschüssigen Stroms ins öffentliche Netz und eine Einnahmenbeteiligung von {credit:.2f} € aus den Mieterzahlungen."
-            elif role == 'operator':
-                explanation = f"**{name}** erhält die Gebühr von den Mieterzahlungen, die sich auf {credit:.2f} € beläuft."
-            else:
-                explanation = f"Für **{name}** wurde eine Gutschrift von {credit:.2f} € und eine Forderung von {debit:.2f} € festgestellt, was zu einem Netto-Saldo von {net:.2f} € führt."
+            explanation = f"**{name}** ({role}): "
             
-            if net > 0:
-                final_status = "erhält eine Auszahlung"
-            elif net < 0:
-                final_status = "hat eine Forderung zu begleichen"
+            if debit > 0 and credit > 0:
+                explanation += f"hatte ursprüngliche Gutschriften von {credit:.2f} € und Forderungen von {debit:.2f} €."
+            elif debit > 0:
+                explanation += f"hatte ursprüngliche Forderungen von {debit:.2f} €."
+            elif credit > 0:
+                explanation += f"hatte ursprüngliche Gutschriften von {credit:.2f} €."
             else:
-                final_status = "hat keinen offenen Saldo"
+                explanation += f"hatte keine ursprünglichen Gutschriften oder Forderungen."
+            
+            if net < 0:
+                explanation += f" Nach dem Netting bleibt ein offener Betrag von **{abs(net):.2f} €**, der beglichen werden muss."
+            elif net > 0:
+                explanation += f" Nach dem Netting bleibt ein offener Betrag von **{abs(net):.2f} €**, den sie erhalten."
+            else:
+                explanation += " Nach dem Netting ist der Saldo **perfekt ausgeglichen**."
 
-            explanation += f" Nach dem Netting {final_status} in Höhe von {abs(net):.2f} €."
             netting_explanations.append(explanation)
 
 
