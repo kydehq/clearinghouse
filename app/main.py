@@ -1,3 +1,4 @@
+# app/main.py
 from __future__ import annotations
 import io
 import json
@@ -14,7 +15,7 @@ from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
 from .settle import apply_policy_and_settle
 from typing import List
-from collections import defaultdict # <-- Hinzugefügt
+from collections import defaultdict
 
 # -----------------------------------------------------------------------------
 # App & Templates/Static
@@ -231,71 +232,44 @@ async def process_data(
         # NEU: Detaillierte Erklärungen basierend auf den Rohdaten
         netting_explanations = []
         raw_events_by_participant = df.groupby('participant_id')
+        
+        # NEU: Eine zentrale Liste mit allen Event-Details, um sie pro Teilnehmer zu filtern
+        detailed_events_list = df.to_dict('records')
 
         for index, row in unique_participants.iterrows():
             p_id = row['participant_id']
-            name = row['participant_name']
+            p_name = row['participant_name']
+            p_role = row['role']
             
-            if p_id in raw_events_by_participant.groups:
-                p_events = raw_events_by_participant.get_group(p_id)
-                summary = defaultdict(lambda: {'total_quantity': 0.0, 'total_eur': 0.0, 'type': '', 'source': ''})
-                
-                # Gruppiere die Events pro Teilnehmer nach Event-Typ und Quelle
-                for _, event_row in p_events.iterrows():
-                    event_type = event_row['event_type']
-                    source = event_row['source']
-                    quantity = to_float_safe(event_row['quantity'])
-                    price = to_float_safe(event_row.get('price_eur_per_kwh', 0.0))
-                    
-                    key = f"{event_type}_{source}"
-                    summary[key]['total_quantity'] += quantity
-                    summary[key]['type'] = event_type
-                    summary[key]['source'] = source
-                    
-                    # Berechne den Geldfluss
-                    if event_type == 'consumption':
-                        summary[key]['total_eur'] += quantity * price
-                    elif event_type == 'production' and source == 'solar':
-                        # Verwende den Policy-Preis, nicht den CSV-Preis
-                        solar_price = float(policy_body.get('solar_production_price', 0.18))
-                        summary[key]['total_eur'] += quantity * solar_price
-                    elif event_type == 'vpp_sale':
-                         vpp_price = float(policy_body.get('vpp_sale_price', 0.09))
-                         summary[key]['total_eur'] += quantity * vpp_price
-                    elif event_type == 'grid_feed':
-                         grid_feed_price = float(policy_body.get('grid_compensation', 0.08))
-                         summary[key]['total_eur'] += quantity * grid_feed_price
-                
-                
-                explanations = [f"**{name}** hatte folgende Aktivität:"]
-                
-                for key, data in summary.items():
-                    event_type = data['type']
-                    source = data['source']
-                    quantity = data['total_quantity']
-                    total_eur = data['total_eur']
-                    
-                    if event_type == 'consumption':
-                        explanations.append(f"• Bezug von {quantity:.2f} kWh ({source}) zu einem Wert von {total_eur:.2f} €.")
-                    elif event_type == 'production':
-                        explanations.append(f"• Produktion von {quantity:.2f} kWh ({source}), was eine Gutschrift von {total_eur:.2f} € generierte.")
-                    elif event_type == 'battery_charge':
-                        explanations.append(f"• Die Batterie wurde um {quantity:.2f} kWh ({source}) aufgeladen.")
-                    elif event_type == 'vpp_sale':
-                        explanations.append(f"• Verkauf von {quantity:.2f} kWh ({source}) an den Markt, was eine Gutschrift von {total_eur:.2f} € generierte.")
-                    elif event_type == 'grid_feed':
-                        explanations.append(f"• Einspeisung von {quantity:.2f} kWh ({source}) ins Netz, was eine Gutschrift von {total_eur:.2f} € generierte.")
+            # Hole die Salden für den aktuellen Teilnehmer aus dem Ergebnis
+            p_data = result_data.get(participant_map_dict.get(p_id).id, {'credit': 0.0, 'debit': 0.0, 'final_net': 0.0})
+            
+            p_events = [e for e in detailed_events_list if e['participant_id'] == p_id]
+            
+            if p_events:
+                # Sammle die Event-Typen und Mengen
+                event_summary = defaultdict(float)
+                for event in p_events:
+                    event_type = event['event_type']
+                    quantity = to_float_safe(event['quantity'])
+                    event_summary[event_type] += quantity
 
-                # Zeige Nettosaldo am Ende der Erklärung
-                net_balance = result_data.get(participant_map_dict.get(p_id).id, {}).get('final_net', 0.0)
-                if net_balance > 0.01:
-                    explanations.append(f"**Nettosaldo: {net_balance:.2f} €** (Erhält eine Auszahlung).")
-                elif net_balance < -0.01:
-                    explanations.append(f"**Nettosaldo: {abs(net_balance):.2f} €** (Schuldet eine Zahlung).")
+                # Erstelle die Erklärungs-Texte
+                explanation_parts = [f"**{p_name}** ({p_role})"]
+                for event_type, quantity in event_summary.items():
+                    explanation_parts.append(f"• hatte {quantity:.2f} kWh {event_type} ({p_events[0]['source']}).")
+                
+                # Füge die berechneten Salden hinzu
+                explanation_parts.append(f"Das ergibt eine Gutschrift von {p_data['credit']:.2f} € und eine Forderung von {p_data['debit']:.2f} €.")
+                
+                if p_data['final_net'] > 0.01:
+                    explanation_parts.append(f"**Nettosaldo: {p_data['final_net']:.2f} €** (Erhält eine Auszahlung).")
+                elif p_data['final_net'] < -0.01:
+                    explanation_parts.append(f"**Nettosaldo: {abs(p_data['final_net']):.2f} €** (Schuldet eine Zahlung).")
                 else:
-                    explanations.append("**Nettosaldo: 0.00 €** (Der Saldo ist perfekt ausgeglichen).")
+                    explanation_parts.append("**Nettosaldo: 0.00 €** (Der Saldo ist perfekt ausgeglichen).")
 
-                netting_explanations.append(" ".join(explanations))
+                netting_explanations.append(" ".join(explanation_parts))
             
         df_for_template = df.to_dict('records')
 
