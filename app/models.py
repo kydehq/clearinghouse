@@ -11,7 +11,7 @@ class ParticipantRole(enum.Enum):
     LANDLORD = "landlord"
     TENANT = "tenant"
     OPERATOR = "operator"
-    COMMERCIAL = "commercial" # <-- Hinzugefügt
+    COMMERCIAL = "commercial" 
     COMMUNITY_FEE_COLLECTOR = "community_fee_collector"
 
 class EventType(enum.Enum):
@@ -19,6 +19,7 @@ class EventType(enum.Enum):
     CONSUMPTION = "consumption"
     BASE_FEE = "base_fee"
     GRID_FEED = "grid_feed"
+    BATTERY_CHARGE = "battery_charge" # <-- Hinzugefügt
 
 class Participant(Base):
     __tablename__ = "participants"

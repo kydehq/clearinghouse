@@ -37,6 +37,7 @@ def get_db():
 # Mini-"Auto-Migration" (idempotent, ohne Bind-Parameter in DDL)
 # ---------------------------------------------------------------------
 def _column_exists(conn, table: str, column: str) -> bool:
+    """Prüft ob eine Spalte in einer Tabelle existiert."""
     row = conn.execute(
         text("""
             SELECT 1
@@ -126,7 +127,8 @@ def _enum_has_value(conn, enum_name: str, value: str) -> bool:
 
 def _ensure_eventtype_enum(conn):
     """Stellt sicher, dass der eventtype Enum alle benötigten Werte hat."""
-    required_values = ['GENERATION', 'CONSUMPTION', 'GRID_FEED', 'BASE_FEE']
+    # Füge 'BATTERY_CHARGE' hier zur Liste hinzu
+    required_values = ['GENERATION', 'CONSUMPTION', 'GRID_FEED', 'BASE_FEE', 'BATTERY_CHARGE']
     
     if not _enum_exists(conn, 'eventtype'):
         # Enum erstellen falls nicht vorhanden
@@ -165,16 +167,11 @@ def _ensure_participantrole_enum(conn):
 def ensure_min_schema():
     """
     Heilt Schema-Drift für PoC-Tabellen:
-      - policies: body(JSON), created_at(TIMESTAMPTZ), DROP definition
-      - usage_events: quantity(FLOAT), unit(VARCHAR 'kWh'), meta(JSON), timestamp(TIMESTAMPTZ)
-      - settlement_batches: use_case(VARCHAR), created_at(TIMESTAMPTZ)
-      - settlement_lines: participant_id, batch_id, amount_eur, description
-      - eventtype enum: stellt sicher dass alle Werte vorhanden sind
     """
     with engine.begin() as conn:
         # ZUERST die Enums sicherstellen
         _ensure_eventtype_enum(conn)
-        _ensure_participantrole_enum(conn) # <-- Hinzugefügt
+        _ensure_participantrole_enum(conn)
         
         # policies minimal sichern
         conn.execute(text("""
@@ -204,8 +201,8 @@ def ensure_min_schema():
         """))
         _add_integer_column_if_missing(conn, "settlement_lines", "participant_id", 0)
         _add_integer_column_if_missing(conn, "settlement_lines", "batch_id", 0)
-        _add_float_column_if_missing(conn, "settlement_lines", "amount", 0.0)  # Original amount Spalte
-        _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)  # Deine neue Spalte
+        _add_float_column_if_missing(conn, "settlement_lines", "amount", 0.0)
+        _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)
         _add_varchar_column_if_missing(conn, "settlement_lines", "description", "")
 
         # usage_events fehlende Spalten nachrüsten
