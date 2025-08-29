@@ -77,55 +77,44 @@ def apply_policy_and_settle(
         landlord_revenue_share = float(policy_body.get('landlord_revenue_share', 0.60))
         operator_fee_rate = float(policy_body.get('operator_fee_rate', 0.15))
         
-        # Summen für die Verteilung berechnen
-        total_tenant_payments = 0.0
+        # Summe der Verbrauchs-Zahlungen für die Verteilung
+        total_consumption_payments = 0.0
         
         # 2) Erster Durchlauf: Einzelne Events verarbeiten
         for ev in events:
             p = ev.participant
             
-            # Mieter zahlen ihren Verbrauch und die Grundgebühr
+            # Mieter zahlen ihren Verbrauch an die Gemeinschaft
             if p.role == ParticipantRole.TENANT:
                 if ev.event_type == EventType.CONSUMPTION:
-                    # Preis aus Metadaten oder Policy nehmen
                     price = ev.meta.get('price_eur_per_kwh', 0.0)
                     cost = ev.quantity * price
                     result[p.id]['debit'] += cost
-                    total_tenant_payments += cost
+                    total_consumption_payments += cost
+                elif ev.event_type == EventType.BASE_FEE:
+                    # Grundgebühr ist eine direkte Zahlung vom Mieter an den Operator
+                    operator = db.query(Participant).filter(Participant.role == ParticipantRole.OPERATOR).first()
+                    if operator:
+                        result[p.id]['debit'] += ev.quantity
+                        result[operator.id]['credit'] += ev.quantity
             
             # Vermieter hat Generation & Einspeisung
             elif p.role == ParticipantRole.LANDLORD:
                 if ev.event_type == EventType.GRID_FEED:
-                    # Einspeisevergütung für den Vermieter (Preis kommt aus CSV)
                     revenue = ev.quantity * ev.meta.get('price_eur_per_kwh', 0.0)
                     result[p.id]['credit'] += revenue
-            
-            # Operator hat die Grundgebühr
-            elif p.role == ParticipantRole.OPERATOR:
-                 if ev.event_type == EventType.BASE_FEE:
-                     # Grundgebühr ist eine direkte Zahlung vom Mieter an den Operator
-                     total_tenant_payments += ev.quantity
-                     # Finde den Mieter (Annahme: es gibt nur einen Mieter)
-                     tenant = db.query(Participant).filter(Participant.role == ParticipantRole.TENANT).first()
-                     if tenant:
-                         result[tenant.id]['debit'] += ev.quantity
-                         result[p.id]['credit'] += ev.quantity
-
-
-        # 3) Zweiter Durchlauf: Verteilungslogik anwenden
+        
+        # 3) Zweiter Durchlauf: Verteilungslogik anwenden, nur auf Basis der Verbrauchszahlungen
         landlord = db.query(Participant).filter(Participant.role == ParticipantRole.LANDLORD).first()
         operator = db.query(Participant).filter(Participant.role == ParticipantRole.OPERATOR).first()
 
         # Einnahmen für Vermieter & Operator
-        # Wichtig: Die Operator-Gebühr wird jetzt nur über den Anteil der Verbrauchszahlungen berechnet,
-        # da die Grundgebühr bereits direkt zugeordnet wurde.
-        consumption_payments = total_tenant_payments - 5.0  # Annahme: 5.0 ist immer die base_fee
         if landlord:
-            landlord_revenue = consumption_payments * landlord_revenue_share
+            landlord_revenue = total_consumption_payments * landlord_revenue_share
             result[landlord.id]['credit'] += landlord_revenue
         
         if operator:
-            operator_fee = consumption_payments * operator_fee_rate
+            operator_fee = total_consumption_payments * operator_fee_rate
             result[operator.id]['credit'] += operator_fee
 
     else:
