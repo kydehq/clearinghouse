@@ -1,3 +1,4 @@
+# app/settle.py
 from __future__ import annotations
 from typing import Dict, Iterable, Tuple, List
 from collections import defaultdict
@@ -74,8 +75,11 @@ def apply_policy_and_settle(
     result = defaultdict(lambda: {'debit': 0.0, 'credit': 0.0})
     
     if use_case == 'mieterstrom':
+        # Policy-Preise
         landlord_revenue_share = float(policy_body.get('landlord_revenue_share', 0.60))
         operator_fee_rate = float(policy_body.get('operator_fee_rate', 0.15))
+        solar_production_price = float(policy_body.get('solar_production_price', 0.18))
+        vpp_sale_price = float(policy_body.get('vpp_sale_price', 0.09))
         
         # Summe der Verbrauchs-Zahlungen für die Verteilung
         total_consumption_payments = 0.0
@@ -85,7 +89,7 @@ def apply_policy_and_settle(
             p = ev.participant
             
             # Mieter zahlen ihren Verbrauch an die Gemeinschaft
-            if p.role == ParticipantRole.TENANT:
+            if p.role == ParticipantRole.TENANT or p.role == ParticipantRole.COMMERCIAL:
                 if ev.event_type == EventType.CONSUMPTION:
                     price = ev.meta.get('price_eur_per_kwh', 0.0)
                     cost = ev.quantity * price
@@ -98,10 +102,20 @@ def apply_policy_and_settle(
                         result[p.id]['debit'] += ev.quantity
                         result[operator.id]['credit'] += ev.quantity
             
-            # Vermieter hat Generation & Einspeisung
+            # Vermieter hat Generation, Einspeisung und Verkäufe
             elif p.role == ParticipantRole.LANDLORD:
                 if ev.event_type == EventType.GRID_FEED:
                     revenue = ev.quantity * ev.meta.get('price_eur_per_kwh', 0.0)
+                    result[p.id]['credit'] += revenue
+                
+                # NEU: Einnahmen aus Solarproduktion (wird in der Regel intern verrechnet)
+                if ev.event_type == EventType.PRODUCTION:
+                    revenue = ev.quantity * solar_production_price
+                    result[p.id]['credit'] += revenue
+
+                # NEU: Einnahmen aus VPP-Verkäufen
+                if ev.event_type == EventType.VPP_SALE:
+                    revenue = ev.quantity * vpp_sale_price
                     result[p.id]['credit'] += revenue
         
         # 3) Zweiter Durchlauf: Verteilungslogik anwenden, nur auf Basis der Verbrauchszahlungen
