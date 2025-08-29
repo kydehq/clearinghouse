@@ -1,4 +1,3 @@
-# app/db.py
 from __future__ import annotations
 
 import os
@@ -142,6 +141,27 @@ def _ensure_eventtype_enum(conn):
                 print(f"Added '{value}' to eventtype enum")
 
 
+def _ensure_participantrole_enum(conn):
+    """Stellt sicher, dass der participantrole Enum alle benötigten Werte hat."""
+    # Füge 'COMMERCIAL' hier zur Liste hinzu
+    required_values = [
+        'PROSUMER', 'CONSUMER', 'LANDLORD', 'TENANT', 'OPERATOR', 
+        'COMMUNITY_FEE_COLLECTOR', 'COMMERCIAL'
+    ]
+    
+    if not _enum_exists(conn, 'participantrole'):
+        # Enum erstellen falls nicht vorhanden
+        values_str = "', '".join(required_values)
+        conn.execute(text(f"CREATE TYPE participantrole AS ENUM ('{values_str}')"))
+        print("Created participantrole enum with all values")
+    else:
+        # Fehlende Werte hinzufügen
+        for value in required_values:
+            if not _enum_has_value(conn, 'participantrole', value):
+                conn.execute(text(f"ALTER TYPE participantrole ADD VALUE '{value}'"))
+                print(f"Added '{value}' to participantrole enum")
+
+
 def ensure_min_schema():
     """
     Heilt Schema-Drift für PoC-Tabellen:
@@ -152,8 +172,9 @@ def ensure_min_schema():
       - eventtype enum: stellt sicher dass alle Werte vorhanden sind
     """
     with engine.begin() as conn:
-        # ZUERST den Enum sicherstellen
+        # ZUERST die Enums sicherstellen
         _ensure_eventtype_enum(conn)
+        _ensure_participantrole_enum(conn) # <-- Hinzugefügt
         
         # policies minimal sichern
         conn.execute(text("""

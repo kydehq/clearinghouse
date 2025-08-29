@@ -1,4 +1,3 @@
-# app/models.py
 from __future__ import annotations
 import enum
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Enum
@@ -12,7 +11,7 @@ class ParticipantRole(enum.Enum):
     LANDLORD = "landlord"
     TENANT = "tenant"
     OPERATOR = "operator"
-    COMMERCIAL = "commercial" 
+    COMMERCIAL = "commercial" # <-- Hinzugefügt
     COMMUNITY_FEE_COLLECTOR = "community_fee_collector"
 
 class EventType(enum.Enum):
