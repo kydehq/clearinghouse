@@ -1,11 +1,11 @@
 from __future__ import annotations
 import enum
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Enum
+from sqlalchemy import Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Enum
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from .db import Base
 
-# Enums nutzen lowercase-Strings (passen zu CSV)
+# Enums nutzen lowercase-Strings (passend zur CSV)
 class ParticipantRole(enum.Enum):
     PROSUMER = "prosumer"
     CONSUMER = "consumer"
@@ -51,7 +51,7 @@ class UsageEvent(Base):
 class Policy(Base):
     __tablename__ = "policies"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    use_case: Mapped[str] = mapped_column(String, index=True)  # 'energy_community' | 'mieterstrom'
+    use_case: Mapped[str] = mapped_column(String, index=True)  # 'mieterstrom'
     body: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

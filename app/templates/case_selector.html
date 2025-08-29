@@ -1,55 +1,11 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ title }}</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-tailwind.config = {
-theme: {
-extend: {
-fontFamily: {
-inter: ['Inter', 'sans-serif'],
-},
-}
-}
-}
-</script>
-<style>
-body {
-font-family: 'Inter', sans-serif;
-}
-</style>
-</head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
-<div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-4xl space-y-8">
-<h1 class="text-4xl font-extrabold text-center text-gray-900 mb-6">
-Lösung für die komplexeste Abrechnung
-</h1>
-<p class="text-center text-gray-600 text-lg mb-8">
-Ihre IT sagt, Sie können das nicht abrechnen? Unser Clearinghouse löst dieses Problem in Sekunden.
-</p>
-<div class="grid grid-cols-1 gap-8">
-<div class="bg-green-50 border border-green-200 rounded-xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1">
-<h2 class="text-3xl font-bold text-green-800 mb-4">
-Ein Mieterstrom-Szenario, das Ihre IT verzweifeln lässt
-</h2>
-<p class="text-gray-700 text-base mb-6">
-Rechnen Sie ein Mehrfamilienhaus mit PV-Anlage, Speicher und Netzbezug ab. Mieter zahlen kWh-Preise, Vermieter erhält Anlagen-Einnahmen, Dienstleister bekommt Management-Gebühr – alles in einem Settlement. <strong>Die Regeln: PV-Strom zum Gestehungspreis, Speicherstrom mit Aufschlag, Netzstrom zum stündlichen Spot-Preis.</strong>
-</p>
-<div class="space-y-4">
-<a href="/upload?case=mieterstrom" class="block w-full text-center bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition-colors">
-Szenario mit KYDE abrechnen
-</a>
-<p class="text-sm text-gray-500 text-center">
-<a href="/static/demo_data/mieterstrom.csv" download="mieterstrom.csv" class="text-green-500 hover:underline">
-Beispiel-Lastgangdaten herunterladen
-</a>
-</p>
-</div>
-</div>
-</div>
-</div>
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>{{ title }}</title></head>
+<body style="font-family:system-ui;padding:24px;max-width:800px;margin:auto">
+  <h1>{{ title }}</h1>
+  <p>Wähle einen Anwendungsfall:</p>
+  <ul>
+    <li><a href="/upload?case=mieterstrom">➡️ Mieterstrom – Daten hochladen</a></li>
+  </ul>
 </body>
 </html>

@@ -5,35 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{{ title }}</title>
   <style>
-    :root{--bg:#f6f7f9;--card:#fff;--muted:#6b7280;--text:#0f172a;--line:#e5e7eb;--green:#065f46;--red:#991b1b;--blue:#1e3a8a}
+    :root{--bg:#f6f7f9;--card:#fff;--muted:#6b7280;--text:#0f172a;--line:#e5e7eb;--green:#065f46;--red:#991b1b}
     body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif}
     .wrap{max-width:1000px;margin:32px auto;padding:16px}
     .card{background:var(--card);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.06);padding:24px;margin-bottom:24px}
-    h1{margin:0 0 16px;font-size:28px}
-    h2{margin:16px 0 8px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:4px}
+    h1{margin:0 0 16px;font-size:28px} h2{margin:16px 0 8px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:4px}
     table{width:100%;border-collapse:collapse;margin-top:8px}
-    th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line)}
+    th,td{padding:10px 12px;text-align:left;border-bottom:1px solid et(--line)}
     thead th{font-weight:600}
     .muted{color:var(--muted)}
-    .badge{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;border:1px solid transparent}
-    .ok{background:#ecfdf5;color:var(--green);border-color:#a7f3d0}
-    .warn{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
-    .err{background:#fee2e2;color:var(--red);border-color:#fecaca}
     .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:8px}
     .kpi{background:#f3f4f6;border-radius:12px;padding:12px}
     .kpi .label{font-size:13px;color:var(--muted)}
     .kpi .value{font-size:20px;font-weight:700;margin-top:4px}
     pre{background:#f3f4f6;padding:12px;border-radius:8px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:13px}
-    .actions{display:flex;gap:12px;align-items:center}
-    .link{color:#2563eb;text-decoration:none} .link:hover{text-decoration:underline}
+    .link{color:#2563eb;text-decoration:none}
   </style>
 </head>
 <body>
   <div class="wrap">
-
-    <!-- Header -->
     <div class="card">
-      <div class="actions" style="justify-content:space-between;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
         <h1>{{ title }}</h1>
         <a class="link" href="/">← Zurück</a>
       </div>
@@ -44,50 +36,24 @@
       </p>
     </div>
 
-    <!-- KPIs & Saldo-Check -->
     {% set ns = namespace(pos=0.0, neg=0.0, count=0) %}
     {% for line in lines %}
       {% set ns.count = ns.count + 1 %}
-      {% if line.amount_eur >= 0 %}
-        {% set ns.pos = ns.pos + line.amount_eur %}
-      {% else %}
-        {% set ns.neg = ns.neg + line.amount_eur %}
-      {% endif %}
+      {% if line.amount_eur >= 0 %}{% set ns.pos = ns.pos + line.amount_eur %}{% else %}{% set ns.neg = ns.neg + line.amount_eur %}{% endif %}
     {% endfor %}
     {% set total = (ns.pos + ns.neg) %}
+
     <div class="card">
       <h2>Prüfstatus & Kennzahlen</h2>
       <div class="kpis">
-        <div class="kpi">
-          <div class="label">Gesamt&nbsp;Auszahlungen (Σ +)</div>
-          <div class="value">€ {{ '%.2f'|format(ns.pos) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="label">Gesamt&nbsp;Forderungen (Σ −)</div>
-          <div class="value">€ {{ '%.2f'|format(ns.neg) }}</div>
-        </div>
-        <div class="kpi">
-          <div class="label">Saldo (soll ≈ 0,00 €)</div>
-          <div class="value">
-            € {{ '%.2f'|format(total) }}
-            {% if total | abs < 0.01 %}
-              <span class="badge ok">ausgeglichen</span>
-            {% elif total | abs < 0.50 %}
-              <span class="badge warn">Rundungsdifferenz</span>
-            {% else %}
-              <span class="badge err">Achtung: nicht ausgeglichen</span>
-            {% endif %}
-          </div>
-        </div>
-        <div class="kpi">
-          <div class="label">Anzahl Buchungen</div>
-          <div class="value">{{ ns.count }}</div>
-        </div>
+        <div class="kpi"><div class="label">Gesamt Auszahlungen (Σ +)</div><div class="value">€ {{ '%.2f'|format(ns.pos) }}</div></div>
+        <div class="kpi"><div class="label">Gesamt Forderungen (Σ −)</div><div class="value">€ {{ '%.2f'|format(ns.neg) }}</div></div>
+        <div class="kpi"><div class="label">Saldo (soll ≈ 0,00 €)</div><div class="value">€ {{ '%.2f'|format(total) }}</div></div>
+        <div class="kpi"><div class="label">Anzahl Buchungen</div><div class="value">{{ ns.count }}</div></div>
       </div>
       <p class="muted" style="margin-top:8px;">*Rundungen auf 2 Nachkommastellen können minimale Abweichungen erzeugen.</p>
     </div>
 
-    <!-- Policy -->
     <div class="card">
       <h2>Angewandte Policy</h2>
       {% if policy %}
@@ -101,19 +67,10 @@
       {% endif %}
     </div>
 
-    <!-- Lines: Auszahlungen (positiv) -->
     <div class="card">
       <h2>Auszahlungen (wir zahlen an)</h2>
       <table>
-        <thead>
-          <tr>
-            <th>Participant ID</th>
-            <th>Name</th>
-            <th>Rolle</th>
-            <th>Betrag (EUR)</th>
-            <th>Beschreibung</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Participant ID</th><th>Name</th><th>Rolle</th><th>Betrag (EUR)</th><th>Beschreibung</th></tr></thead>
         <tbody>
           {% set any_pos = false %}
           {% for line in lines %}
@@ -128,26 +85,15 @@
               </tr>
             {% endif %}
           {% endfor %}
-          {% if not any_pos %}
-            <tr><td colspan="5" class="muted">Keine Auszahlungen vorhanden.</td></tr>
-          {% endif %}
+          {% if not any_pos %}<tr><td colspan="5" class="muted">Keine Auszahlungen vorhanden.</td></tr>{% endif %}
         </tbody>
       </table>
     </div>
 
-    <!-- Lines: Forderungen (negativ) -->
     <div class="card">
       <h2>Forderungen (Teilnehmer schulden)</h2>
       <table>
-        <thead>
-          <tr>
-            <th>Participant ID</th>
-            <th>Name</th>
-            <th>Rolle</th>
-            <th>Betrag (EUR)</th>
-            <th>Beschreibung</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Participant ID</th><th>Name</th><th>Rolle</th><th>Betrag (EUR)</th><th>Beschreibung</th></tr></thead>
         <tbody>
           {% set any_neg = false %}
           {% for line in lines %}
@@ -162,16 +108,12 @@
               </tr>
             {% endif %}
           {% endfor %}
-          {% if not any_neg %}
-            <tr><td colspan="5" class="muted">Keine Forderungen vorhanden.</td></tr>
-          {% endif %}
+          {% if not any_neg %}<tr><td colspan="5" class="muted">Keine Forderungen vorhanden.</td></tr>{% endif %}
         </tbody>
       </table>
     </div>
 
-    <div style="text-align:center;">
-      <a class="link" href="/">Zurück zur Auswahl</a>
-    </div>
+    <div style="text-align:center;"><a class="link" href="/">Zurück zur Auswahl</a></div>
   </div>
 </body>
 </html>

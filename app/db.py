@@ -3,13 +3,9 @@ import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# ---------------------------------------------------------------------
-# Engine / Session / Base
-# ---------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL Umgebungsvariable ist nicht gesetzt.")
-# Railway/Heroku liefern teils 'postgres://', SQLAlchemy erwartet 'postgresql://'
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -18,8 +14,7 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, futu
 Base = declarative_base()
 
 def create_db_and_tables() -> None:
-    """legt neue Tabellen an (migriert nicht bestehende)."""
-    from . import models  # noqa: F401
+    from . import models  # noqa
     Base.metadata.create_all(bind=engine)
 
 def get_db():
@@ -29,17 +24,10 @@ def get_db():
     finally:
         db.close()
 
-# ---------------------------------------------------------------------
-# Mini-"Auto-Migration" (idempotent, für PoC)
-# ---------------------------------------------------------------------
+# ---------- Auto-Migration helpers (idempotent) ----------
 def _enum_exists(conn, enum_name: str) -> bool:
     row = conn.execute(
-        text("""
-            SELECT 1
-            FROM pg_type
-            WHERE typname = :enum_name AND typtype = 'e'
-            LIMIT 1
-        """),
+        text("""SELECT 1 FROM pg_type WHERE typname = :enum_name AND typtype = 'e' LIMIT 1"""),
         {"enum_name": enum_name},
     ).first()
     return row is not None
@@ -47,11 +35,9 @@ def _enum_exists(conn, enum_name: str) -> bool:
 def _enum_has_value(conn, enum_name: str, value: str) -> bool:
     row = conn.execute(
         text("""
-            SELECT 1
-            FROM pg_enum pe
+            SELECT 1 FROM pg_enum pe
             JOIN pg_type pt ON pe.enumtypid = pt.oid
-            WHERE pt.typname = :enum_name AND pe.enumlabel = :value
-            LIMIT 1
+            WHERE pt.typname = :enum_name AND pe.enumlabel = :value LIMIT 1
         """),
         {"enum_name": enum_name, "value": value},
     ).first()
@@ -69,10 +55,8 @@ def _ensure_enum_values(conn, enum_name: str, values: list[str]):
 def _column_exists(conn, table: str, column: str) -> bool:
     row = conn.execute(
         text("""
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = :t AND column_name = :c
-            LIMIT 1
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = :t AND column_name = :c LIMIT 1
         """),
         {"t": table, "c": column},
     ).first()
@@ -119,14 +103,11 @@ def _drop_column_if_exists(conn, table: str, column: str):
         conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
 
 def ensure_min_schema():
-    """
-    Heilt Schema-Drift für PoC-Tabellen (Enums + fehlende Spalten).
-    Enums/Werte in lowercase, passend zu Python-Enum-Werten & CSV.
-    """
-    from . import models  # noqa: F401
+    """Heilt Schema-Drift für PoC-Tabellen (Enums + fehlende Spalten)."""
+    from . import models  # noqa
 
     with engine.begin() as conn:
-        # Enums sicherstellen (lowercase values)
+        # Enums sicherstellen (lowercase)
         _ensure_enum_values(conn, 'eventtype', [
             'generation', 'consumption', 'grid_feed', 'base_fee',
             'battery_charge', 'production', 'vpp_sale', 'battery_discharge'
@@ -137,31 +118,18 @@ def ensure_min_schema():
         ])
 
         # policies
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS policies (
-                id SERIAL PRIMARY KEY,
-                use_case VARCHAR NOT NULL
-            );
-        """))
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS policies (id SERIAL PRIMARY KEY, use_case VARCHAR NOT NULL);"""))
         _add_json_column_if_missing(conn,  "policies", "body")
         _add_timestamptz_column_if_missing(conn, "policies", "created_at")
         _drop_column_if_exists(conn, "policies", "definition")
 
         # settlement_batches
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS settlement_batches (
-                id SERIAL PRIMARY KEY
-            );
-        """))
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_batches (id SERIAL PRIMARY KEY);"""))
         _add_varchar_column_if_missing(conn, "settlement_batches", "use_case", "mieterstrom")
         _add_timestamptz_column_if_missing(conn, "settlement_batches", "created_at")
 
         # settlement_lines
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS settlement_lines (
-                id SERIAL PRIMARY KEY
-            );
-        """))
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_lines (id SERIAL PRIMARY KEY);"""))
         _add_integer_column_if_missing(conn, "settlement_lines", "participant_id", 0)
         _add_integer_column_if_missing(conn, "settlement_lines", "batch_id", 0)
         _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)

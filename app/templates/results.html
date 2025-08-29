@@ -37,9 +37,6 @@
   .link{color:#2563eb;text-decoration:none}
   .link:hover{text-decoration:underline}
   .error{background:#fee2e2;color:#991b1b;padding:1rem;border-radius:.75rem;margin-top:1rem;white-space:pre-wrap}
-  details{background:#fff7ed;border:1px solid #fed7aa;border-radius:.75rem;padding:.75rem 1rem;margin-top:.5rem}
-  summary{cursor:pointer;font-weight:600;color:#9a3412}
-  pre{margin-top:.5rem;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:.875rem}
   .badge{display:inline-block;padding:.15rem .5rem;border-radius:9999px;font-size:.75rem;font-weight:600}
   .badge-green{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
   .badge-blue{background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe}
@@ -59,10 +56,7 @@
     {% if error %}
       <div class="error">
         <strong>Verarbeitung fehlgeschlagen:</strong>
-        <details>
-          <summary>Details anzeigen</summary>
-          <pre>{{ error }}</pre>
-        </details>
+        <details><summary>Details anzeigen</summary><pre>{{ error }}</pre></details>
       </div>
     {% else %}
 
@@ -72,54 +66,22 @@
 
       <!-- KPIs -->
       <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Brutto-Exposure (vor Netting)</div>
-          <div class="kpi-value">€ {{ '%.2f'|format(kpis.gross_exposure|default(0)) }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Summe Credits</div>
-          <div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_credit|default(0)) }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Summe Debits</div>
-          <div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_debit|default(0)) }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Netting-Effizienz</div>
-          <div class="kpi-value">{{ '%.0f'|format((kpis.netting_efficiency|default(0))*100) }}%</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label"># Zahlungen nach Netting</div>
-          <div class="kpi-value">{{ kpis.transfers_count|default(0) }}</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Beteiligte Parteien</div>
-          <div class="kpi-value">{{ kpis.participants|default(0) }}</div>
-        </div>
+        <div class="kpi-card"><div class="kpi-label">Brutto-Exposure (vor Netting)</div><div class="kpi-value">€ {{ '%.2f'|format(kpis.gross_exposure|default(0)) }}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Summe Credits</div><div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_credit|default(0)) }}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Summe Debits</div><div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_debit|default(0)) }}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Netting-Effizienz</div><div class="kpi-value">{{ '%.0f'|format((kpis.netting_efficiency|default(0))*100) }}%</div></div>
+        <div class="kpi-card"><div class="kpi-label"># Zahlungen nach Netting</div><div class="kpi-value">{{ kpis.transfers_count|default(0) }}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Beteiligte Parteien</div><div class="kpi-value">{{ kpis.participants|default(0) }}</div></div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
         <!-- LEFT: Raw Data -->
         <div>
-          <h2 class="text-2xl font-bold text-gray-800 mb-2">
-            Rohdaten: Das manuelle Problem
-          </h2>
-          <p class="text-gray-600 mb-4">
-            15-Minuten-Intervalle, dynamische Preise, lokale PV/Batterie & Netz – manuell kaum fehlerfrei abrechenbar.
-          </p>
+          <h2 class="text-2xl font-bold text-gray-800 mb-2">Rohdaten: Das manuelle Problem</h2>
+          <p class="text-gray-600 mb-4">15-Minuten-Intervalle, dynamische Preise, lokale PV/Batterie & Netz – manuell kaum fehlerfrei abrechenbar.</p>
           <div class="overflow-x-auto bg-gray-50 rounded-lg shadow-inner border border-gray-200" style="max-height: 400px;">
             <table class="min-w-full text-sm">
-              <thead>
-                <tr>
-                  <th class="whitespace-nowrap">Zeitpunkt</th>
-                  <th class="whitespace-nowrap">Teilnehmer</th>
-                  <th class="whitespace-nowrap">Rolle</th>
-                  <th class="whitespace-nowrap">Typ</th>
-                  <th class="whitespace-nowrap">Menge</th>
-                  <th class="whitespace-nowrap">Quelle</th>
-                  <th class="whitespace-nowrap">Preis (€/kWh)</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Zeitpunkt</th><th>Teilnehmer</th><th>Rolle</th><th>Typ</th><th>Menge</th><th>Quelle</th><th>Preis (€/kWh)</th></tr></thead>
               <tbody>
                 {% for event in events_raw_data %}
                 <tr>
@@ -127,62 +89,40 @@
                   <td class="whitespace-nowrap">{{ event.participant_name }}</td>
                   <td class="whitespace-nowrap">{{ event.role }}</td>
                   <td class="whitespace-nowrap">{{ event.event_type }}</td>
-                  <td class="whitespace-nowrap">
-                    {% if event.event_type == 'base_fee' %}{{ '%.2f'|format(event.quantity) }} EUR{% else %}{{ '%.2f'|format(event.quantity) }} kWh{% endif %}
-                  </td>
+                  <td class="whitespace-nowrap">{% if event.event_type == 'base_fee' %}{{ '%.2f'|format(event.quantity) }} EUR{% else %}{{ '%.2f'|format(event.quantity) }} kWh{% endif %}</td>
                   <td class="whitespace-nowrap">{{ event.source }}</td>
                   <td class="whitespace-nowrap">{{ '%.3f'|format(event.price_eur_per_kwh|default(0)) }}</td>
                 </tr>
                 {% else %}
-                <tr>
-                  <td colspan="7" class="text-center text-gray-500 py-4">
-                    <p>Keine Rohdaten verfügbar oder die CSV-Datei war leer.</p>
-                    <p>Bitte stellen Sie sicher, dass die CSV-Datei Events enthält.</p>
-                  </td>
-                </tr>
+                <tr><td colspan="7" class="text-center text-gray-500 py-4">Keine Rohdaten verfügbar.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
-          <p class="text-sm text-gray-500 mt-2">
-            *Auszug der ersten {{ events_raw_data | length }} Zeilen. Beträge gerundet; Summen können durch Rundung leicht abweichen.
-          </p>
+          <p class="text-sm text-gray-500 mt-2">*Auszug. Rundungen können minimale Abweichungen erzeugen.</p>
         </div>
 
         <!-- RIGHT: Results -->
         <div>
-          <h2 class="text-2xl font-bold text-kydeGreen mb-1">
-            KYDE-Settlement: Die automatisierte Lösung
-          </h2>
+          <h2 class="text-2xl font-bold text-kydeGreen mb-1">KYDE-Settlement: Die automatisierte Lösung</h2>
           <p class="text-gray-600 mb-4">
-            <span class="badge badge-blue">Vorher</span> Brutto-Exposures → 
-            <span class="badge badge-amber">Zahlungsplan</span> minimiert Transfers → 
+            <span class="badge badge-blue">Vorher</span> Brutto-Exposures →
+            <span class="badge badge-amber">Zahlungsplan</span> minimiert Transfers →
             <span class="badge badge-green">Nachher</span> finale Nettosaldi.
           </p>
 
-          <!-- Explanations -->
           {% if netting_explanations %}
           <div class="space-y-3 mb-4 text-sm text-gray-700">
-            {% for explanation in netting_explanations %}
-              <p>{{ explanation|safe }}</p>
-            {% endfor %}
+            {% for explanation in netting_explanations %}<p>{{ explanation|safe }}</p>{% endfor %}
           </div>
           {% endif %}
 
-          <!-- Table: Vor Netting (Brutto) -->
+          <!-- Vor Netting -->
           <div class="mt-4">
             <h3 class="text-lg font-semibold">Vor Netting (Brutto-Exposures)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
               <table class="min-w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Rolle</th>
-                    <th>Soll (€)</th>
-                    <th>Haben (€)</th>
-                    <th>Brutto-Saldo (€)</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>Name</th><th>Rolle</th><th>Soll (€)</th><th>Haben (€)</th><th>Brutto-Saldo (€)</th></tr></thead>
                 <tbody>
                   {% for r in rows %}
                   <tr>
@@ -190,9 +130,7 @@
                     <td class="whitespace-nowrap">{{ r.role }}</td>
                     <td class="whitespace-nowrap">{{ '%.2f'|format(r.debit_eur|default(0)) }}</td>
                     <td class="whitespace-nowrap">{{ '%.2f'|format(r.credit_eur|default(0)) }}</td>
-                    <td class="whitespace-nowrap font-semibold {% if r.pre_net_eur > 0 %}text-green-700{% elif r.pre_net_eur < 0 %}text-red-700{% endif %}">
-                      {{ '%.2f'|format(r.pre_net_eur|default(0)) }}
-                    </td>
+                    <td class="whitespace-nowrap font-semibold {% if r.pre_net_eur > 0 %}text-green-700{% elif r.pre_net_eur < 0 %}text-red-700{% endif %}">{{ '%.2f'|format(r.pre_net_eur|default(0)) }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -200,59 +138,37 @@
             </div>
           </div>
 
-          <!-- Table: Zahlungsplan (nach Bilateral Netting) -->
+          <!-- Zahlungsplan -->
           <div class="mt-6">
             <h3 class="text-lg font-semibold">Zahlungsplan (nach Netting)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
               <table class="min-w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Von</th>
-                    <th>An</th>
-                    <th>Betrag (€)</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>Von</th><th>An</th><th>Betrag (€)</th></tr></thead>
                 <tbody>
                   {% if transfers and transfers|length > 0 %}
                     {% for t in transfers %}
-                    <tr>
-                      <td class="whitespace-nowrap">{{ t.from }}</td>
-                      <td class="whitespace-nowrap">{{ t.to }}</td>
-                      <td class="whitespace-nowrap font-semibold">{{ '%.2f'|format(t.amount_eur) }}</td>
-                    </tr>
+                    <tr><td class="whitespace-nowrap">{{ t.from }}</td><td class="whitespace-nowrap">{{ t.to }}</td><td class="whitespace-nowrap font-semibold">{{ '%.2f'|format(t.amount_eur) }}</td></tr>
                     {% endfor %}
                   {% else %}
-                    <tr>
-                      <td colspan="3" class="text-center text-gray-500 py-3">
-                        Alle Salden intern ausgeglichen – keine Zahlungen erforderlich.
-                      </td>
-                    </tr>
+                    <tr><td colspan="3" class="text-center text-gray-500 py-3">Alle Salden intern ausgeglichen – keine Zahlungen erforderlich.</td></tr>
                   {% endif %}
                 </tbody>
               </table>
             </div>
           </div>
 
-          <!-- Table: Nach Netting (finale Nettosalden) -->
+          <!-- Nach Netting -->
           <div class="mt-6">
             <h3 class="text-lg font-semibold">Nach Netting (finale Nettosalden)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
               <table class="min-w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Rolle</th>
-                    <th>Netto-Saldo (€)</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>Name</th><th>Rolle</th><th>Netto-Saldo (€)</th></tr></thead>
                 <tbody>
                   {% for r in rows %}
                   <tr>
                     <td class="whitespace-nowrap">{{ r.name }}</td>
                     <td class="whitespace-nowrap">{{ r.role }}</td>
-                    <td class="whitespace-nowrap font-bold {% if r.net_eur > 0 %}text-green-700{% elif r.net_eur < 0 %}text-red-700{% endif %}">
-                      {{ '%.2f'|format(r.net_eur|default(0)) }}
-                    </td>
+                    <td class="whitespace-nowrap font-bold {% if r.net_eur > 0 %}text-green-700{% elif r.net_eur < 0 %}text-red-700{% endif %}">{{ '%.2f'|format(r.net_eur|default(0)) }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -264,12 +180,8 @@
       </div>
 
       <div class="mt-8 text-center">
-        <p class="text-lg font-semibold text-kydeDarkBlue mb-2">
-          Wie lange würde Ihre Fachabteilung benötigen, um das manuell und fehlerfrei zu erstellen?
-        </p>
-        <p class="text-xl font-bold text-kydeGreen mb-4">
-          Wir liefern das in Millisekunden – audit-sicher und sofort skalierbar.
-        </p>
+        <p class="text-lg font-semibold text-kydeDarkBlue mb-2">Wie lange würde Ihre Fachabteilung benötigen, um das manuell und fehlerfrei zu erstellen?</p>
+        <p class="text-xl font-bold text-kydeGreen mb-4">Wir liefern das in Millisekunden – audit-sicher und sofort skalierbar.</p>
         <a href="/" class="link text-lg">Zurück zur Auswahl</a>
       </div>
 
