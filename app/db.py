@@ -128,8 +128,7 @@ def _enum_has_value(conn, enum_name: str, value: str) -> bool:
 def _ensure_eventtype_enum(conn):
     """Stellt sicher, dass der eventtype Enum alle benötigten Werte hat."""
     # Füge 'VPP_SALE' hier zur Liste hinzu
-    required_values = ['GENERATION', 'CONSUMPTION', 'GRID_FEED', 'BASE_FEE', 'BATTERY_CHARGE', 'PRODUCTION', 'VPP_SALE']
-    
+    required_values = ['GENERATION','CONSUMPTION','GRID_FEED','BASE_FEE','BATTERY_CHARGE','PRODUCTION','VPP_SALE','BATTERY_DISCHARGE']
     if not _enum_exists(conn, 'eventtype'):
         # Enum erstellen falls nicht vorhanden
         values_str = "', '".join(required_values)
@@ -145,10 +144,7 @@ def _ensure_eventtype_enum(conn):
 
 def _ensure_participantrole_enum(conn):
     """Stellt sicher, dass der participantrole Enum alle benötigten Werte hat."""
-    required_values = [
-        'PROSUMER', 'CONSUMER', 'LANDLORD', 'TENANT', 'OPERATOR', 
-        'COMMUNITY_FEE_COLLECTOR', 'COMMERCIAL'
-    ]
+    required_values = ['PROSUMER','CONSUMER','LANDLORD','TENANT','OPERATOR','COMMUNITY_FEE_COLLECTOR','COMMERCIAL','EXTERNAL_MARKET']
     
     if not _enum_exists(conn, 'participantrole'):
         # Enum erstellen falls nicht vorhanden

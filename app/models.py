@@ -13,6 +13,7 @@ class ParticipantRole(enum.Enum):
     OPERATOR = "operator"
     COMMERCIAL = "commercial" 
     COMMUNITY_FEE_COLLECTOR = "community_fee_collector"
+    EXTERNAL_MARKET = "external_market"
 
 class EventType(enum.Enum):
     GENERATION = "generation"
@@ -22,6 +23,7 @@ class EventType(enum.Enum):
     BATTERY_CHARGE = "battery_charge"
     PRODUCTION = "production"
     VPP_SALE = "vpp_sale" # <-- Hinzugefügt
+    BATTERY_DISCHARGE = "battery_discharge"
 
 class Participant(Base):
     __tablename__ = "participants"
@@ -80,3 +82,4 @@ class LedgerEntry(Base):
     timestamp: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     participant = relationship("Participant", back_populates="ledger_entries")
+

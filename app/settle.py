@@ -8,52 +8,62 @@ from .models import (
     ParticipantRole, EventType
 )
 
+EPS = 1e-9
+
+
 def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float]]:
     """
     Führt bilaterales Netting zwischen Teilnehmern durch.
+
     Returns:
     - final_balances: {participant_id: net_amount} nach Cross-Participant Netting
     - netting_stats: Statistiken über die Netting-Effizienz
     """
     internal_netted = {}
     total_abs_before_internal = 0.0
+
+    # 1) Teilnehmer-internes Netting (credit - debit)
     for pid, balances in participants_balances.items():
         credit = balances.get('credit', 0.0)
         debit = balances.get('debit', 0.0)
         net = credit - debit
         internal_netted[pid] = net
         total_abs_before_internal += abs(credit) + abs(debit)
+
     total_abs_after_internal = sum(abs(net) for net in internal_netted.values())
-    
-    positive_balances = [(pid, amount) for pid, amount in internal_netted.items() if amount > 1e-9]
-    negative_balances = [(pid, -amount) for pid, amount in internal_netted.items() if amount < -1e-9]
-    
+
+    # 2) Bilaterales Netting zwischen Teilnehmern
+    positive_balances = [(pid, amount) for pid, amount in internal_netted.items() if amount > EPS]
+    negative_balances = [(pid, -amount) for pid, amount in internal_netted.items() if amount < -EPS]
+
     positive_balances.sort(key=lambda x: x[1], reverse=True)
     negative_balances.sort(key=lambda x: x[1], reverse=True)
+
     final_balances = {pid: 0.0 for pid in internal_netted.keys()}
-    transfers = []
+    transfers: List[Tuple[int, int, float]] = []
+
     i, j = 0, 0
     while i < len(positive_balances) and j < len(negative_balances):
         creditor_id, credit_amount = positive_balances[i]
         debtor_id, debt_amount = negative_balances[j]
-        
+
         transfer_amount = min(credit_amount, debt_amount)
-        if transfer_amount > 1e-9:
+        if transfer_amount > EPS:
             transfers.append((debtor_id, creditor_id, transfer_amount))
-        
+
         positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
         negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
-        
-        if positive_balances[i][1] < 1e-9:
+
+        if positive_balances[i][1] < EPS:
             i += 1
-        if negative_balances[j][1] < 1e-9:
+        if negative_balances[j][1] < EPS:
             j += 1
-            
+
     for creditor_id, remaining_credit in positive_balances:
         final_balances[creditor_id] = remaining_credit
     for debtor_id, remaining_debt in negative_balances:
         final_balances[debtor_id] = -remaining_debt
-        
+
     total_abs_after_bilateral = sum(abs(balance) for balance in final_balances.values())
     netting_stats = {
         'total_transfers': len(transfers),
@@ -61,9 +71,25 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
         'bilateral_netting_efficiency': 1 - (total_abs_after_bilateral / total_abs_after_internal) if total_abs_after_internal > 0 else 0,
         'overall_netting_efficiency': 1 - (total_abs_after_bilateral / total_abs_before_internal) if total_abs_before_internal > 0 else 0,
         'volume_reduction': total_abs_before_internal - total_abs_after_bilateral,
-        'transfers_list': transfers
+        'transfers_list': transfers,
     }
     return final_balances, netting_stats
+
+
+def _ensure_external_market(db: Session) -> Participant:
+    """Sorgt dafür, dass ein External-Market-Teilnehmer existiert."""
+    external = db.query(Participant).filter(Participant.role == ParticipantRole.EXTERNAL_MARKET).first()
+    if external:
+        return external
+    external = Participant(
+        external_id="EXTERNAL",
+        name="DSO/Market",
+        role=ParticipantRole.EXTERNAL_MARKET,
+    )
+    db.add(external)
+    db.flush()
+    return external
+
 
 def apply_policy_and_settle(
     db: Session,
@@ -71,88 +97,126 @@ def apply_policy_and_settle(
     policy_body: dict,
     events: Iterable[UsageEvent]
 ) -> Tuple[SettlementBatch, Dict]:
-    # 1) Money-Flows nach Policy je Event berechnen
-    result = defaultdict(lambda: {'debit': 0.0, 'credit': 0.0})
-    
-    if use_case == 'mieterstrom':
-        # Policy-Preise
-        landlord_revenue_share = float(policy_body.get('landlord_revenue_share', 0.60))
-        operator_fee_rate = float(policy_body.get('operator_fee_rate', 0.15))
-        solar_production_price = float(policy_body.get('solar_production_price', 0.18))
-        vpp_sale_price = float(policy_body.get('vpp_sale_price', 0.09))
-        
-        # Summe der Verbrauchs-Zahlungen für die Verteilung
-        total_consumption_payments = 0.0
-        
-        # 2) Erster Durchlauf: Einzelne Events verarbeiten
-        for ev in events:
-            p = ev.participant
-            
-            # Mieter zahlen ihren Verbrauch an die Gemeinschaft
-            if p.role == ParticipantRole.TENANT or p.role == ParticipantRole.COMMERCIAL:
-                if ev.event_type == EventType.CONSUMPTION:
-                    price = ev.meta.get('price_eur_per_kwh', 0.0)
-                    cost = ev.quantity * price
-                    result[p.id]['debit'] += cost
-                    total_consumption_payments += cost
-                elif ev.event_type == EventType.BASE_FEE:
-                    # Grundgebühr ist eine direkte Zahlung vom Mieter an den Operator
-                    operator = db.query(Participant).filter(Participant.role == ParticipantRole.OPERATOR).first()
-                    if operator:
-                        result[p.id]['debit'] += ev.quantity
-                        result[operator.id]['credit'] += ev.quantity
-            
-            # Vermieter hat Generation, Einspeisung und Verkäufe
-            elif p.role == ParticipantRole.LANDLORD:
-                if ev.event_type == EventType.GRID_FEED:
-                    revenue = ev.quantity * ev.meta.get('price_eur_per_kwh', 0.0)
-                    result[p.id]['credit'] += revenue
-                
-                # NEU: Einnahmen aus Solarproduktion (wird in der Regel intern verrechnet)
-                if ev.event_type == EventType.PRODUCTION:
-                    revenue = ev.quantity * solar_production_price
-                    result[p.id]['credit'] += revenue
+    """
+    Double-Entry-Settlement für Mieterstrom:
+    - local_pv/battery -> Mieter/GEWERBE zahlen an LANDLORD (lokaler PV-Preis aus Policy).
+    - grid_external   -> Mieter/GEWERBE zahlen an EXTERNAL_MARKET (Spot/CSV-Preis).
+    - grid_feed       -> EXTERNAL_MARKET zahlt an LANDLORD (Einspeise-Preis).
+    - vpp_sale        -> EXTERNAL_MARKET zahlt an LANDLORD (VPP-Preis).
+    - base_fee (EUR)  -> Mieter/GEWERBE zahlen an OPERATOR.
 
-                # NEU: Einnahmen aus VPP-Verkäufen
-                if ev.event_type == EventType.VPP_SALE:
-                    revenue = ev.quantity * vpp_sale_price
-                    result[p.id]['credit'] += revenue
-        
-        # 3) Zweiter Durchlauf: Verteilungslogik anwenden, nur auf Basis der Verbrauchszahlungen
-        landlord = db.query(Participant).filter(Participant.role == ParticipantRole.LANDLORD).first()
-        operator = db.query(Participant).filter(Participant.role == ParticipantRole.OPERATOR).first()
-
-        # Einnahmen für Vermieter & Operator
-        if landlord:
-            landlord_revenue = total_consumption_payments * landlord_revenue_share
-            result[landlord.id]['credit'] += landlord_revenue
-        
-        if operator:
-            operator_fee = total_consumption_payments * operator_fee_rate
-            result[operator.id]['credit'] += operator_fee
-
-    else:
+    PRODUCTION/GNERATION sind physikalisch (kein Geldfluss). BATTERY_CHARGE:
+      - qty > 0 & source=grid_external  -> LANDLORD zahlt an EXTERNAL_MARKET (Ladekosten).
+      - qty <= 0 (Discharge) / source=local_pv -> kein Geldfluss.
+    """
+    if use_case != 'mieterstrom':
         raise ValueError(f"Unbekannter use_case: {use_case}")
 
-    # 4) Bilateral Netting anwenden
+    # Preise aus Policy (Fallbacks)
+    local_pv_price = float(policy_body.get('local_pv_price_eur_kwh', 0.20))
+    feed_in_price = float(policy_body.get('feed_in_price_eur_kwh', 0.08))
+    vpp_sale_price = float(policy_body.get('vpp_sale_price_eur_kwh', 0.10))
+
+    # Teilnehmer
+    landlord = db.query(Participant).filter(Participant.role == ParticipantRole.LANDLORD).first()
+    operator = db.query(Participant).filter(Participant.role == ParticipantRole.OPERATOR).first()
+    external = _ensure_external_market(db)
+
+    if not landlord:
+        raise ValueError("Kein LANDLORD im Datensatz gefunden. (role='landlord')")
+
+    # Ergebniscontainer: Geldflüsse je Teilnehmer
+    result: Dict[int, Dict[str, float]] = defaultdict(lambda: {'debit': 0.0, 'credit': 0.0})
+
+    # 1) Ereignisse in Double-Entry buchen
+    for ev in events:
+        p = ev.participant
+        qty = float(ev.quantity or 0.0)
+        meta = ev.meta or {}
+        src = (meta.get('source') or '').lower()
+        price_meta = float(meta.get('price_eur_per_kwh') or 0.0)
+
+        # --- Mieter & Gewerbe ---
+        if p.role in (ParticipantRole.TENANT, ParticipantRole.COMMERCIAL):
+            if ev.event_type == EventType.CONSUMPTION and qty > EPS:
+                if src in ('local_pv', 'battery', 'local_battery'):
+                    # Local PV/Battery: Mieter -> Landlord
+                    cost = qty * local_pv_price
+                    result[p.id]['debit'] += cost
+                    result[landlord.id]['credit'] += cost
+                elif src == 'grid_external' or src == 'grid':
+                    # Grid: Mieter -> External Market (Spot aus CSV)
+                    price = price_meta
+                    cost = qty * price
+                    result[p.id]['debit'] += cost
+                    result[external.id]['credit'] += cost
+                else:
+                    # Fallback: behandle wie Grid mit vorhandenen Preisinfos (ggf. 0)
+                    cost = qty * price_meta
+                    result[p.id]['debit'] += cost
+                    result[external.id]['credit'] += cost
+
+            elif ev.event_type == EventType.BASE_FEE and operator:
+                # BASE_FEE ist bereits EUR in 'quantity'
+                amount_eur = qty
+                if abs(amount_eur) > EPS:
+                    result[p.id]['debit'] += amount_eur
+                    result[operator.id]['credit'] += amount_eur
+
+        # --- Landlord & Marktinteraktionen ---
+        elif p.role == ParticipantRole.LANDLORD:
+            if ev.event_type == EventType.GRID_FEED and qty > EPS:
+                # External -> Landlord (Einspeisevergütung)
+                price = price_meta if price_meta > 0 else feed_in_price
+                revenue = qty * price
+                result[p.id]['credit'] += revenue
+                result[external.id]['debit'] += revenue
+
+            elif ev.event_type == EventType.VPP_SALE and qty > EPS:
+                # External -> Landlord (VPP-Erlös)
+                price = price_meta if price_meta > 0 else vpp_sale_price
+                revenue = qty * price
+                result[p.id]['credit'] += revenue
+                result[external.id]['debit'] += revenue
+
+            elif ev.event_type == EventType.BATTERY_CHARGE:
+                # Positive qty = Charge, negative qty = Discharge (kein Geldfluss)
+                if qty > EPS and src in ('grid_external', 'grid'):
+                    # Landlord kauft Strom vom Markt zum Laden
+                    price = price_meta
+                    cost = qty * price
+                    result[p.id]['debit'] += cost
+                    result[external.id]['credit'] += cost
+                # Charge aus local_pv -> kein Geldfluss; Discharge -> auch kein Geldfluss hier
+
+            elif ev.event_type in (EventType.PRODUCTION, EventType.GENERATION):
+                # Nur physikalisch, kein Geldfluss
+                pass
+
+        # Optional: Weitere Rollen/Events hier ergänzen (z.B. COMMUNITY_FEE_COLLECTOR etc.)
+
+    # 2) Bilaterales Netting anwenden
     final_balances, netting_stats = apply_bilateral_netting(result)
 
-    # 5) KPIs berechnen und Daten für die UI aufbereiten
-    participant_result = {}
-    for pid in final_balances.keys():
+    # 3) Teilnehmer-Result für UI zusammenstellen
+    participant_result: Dict[int, Dict[str, float]] = {}
+    for pid in result.keys() | final_balances.keys():
+        credit = result.get(pid, {}).get('credit', 0.0)
+        debit = result.get(pid, {}).get('debit', 0.0)
         participant_result[pid] = {
-            'credit': result.get(pid, {}).get('credit', 0.0),
-            'debit': result.get(pid, {}).get('debit', 0.0),
-            'net': final_balances[pid],
-            'final_net': final_balances[pid]
+            'credit': credit,
+            'debit': debit,
+            'net': final_balances.get(pid, credit - debit),
+            'final_net': final_balances.get(pid, credit - debit),
         }
-    
-    # In DB speichern
+
+    # 4) Batch + SettlementLines persistieren
     batch = SettlementBatch(use_case=use_case)
     db.add(batch)
     db.flush()
+
     for pid, final_net in final_balances.items():
-        if abs(final_net) < 1e-9:
+        if abs(final_net) < EPS:
             continue
         db.add(SettlementLine(
             batch_id=batch.id,
@@ -160,6 +224,7 @@ def apply_policy_and_settle(
             amount_eur=round(final_net, 2),
             description=f"Net after bilateral netting ({use_case})",
         ))
+
     db.commit()
     db.refresh(batch)
 
