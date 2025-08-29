@@ -19,7 +19,8 @@ class EventType(enum.Enum):
     CONSUMPTION = "consumption"
     BASE_FEE = "base_fee"
     GRID_FEED = "grid_feed"
-    BATTERY_CHARGE = "battery_charge" # <-- Hinzugefügt
+    BATTERY_CHARGE = "battery_charge"
+    PRODUCTION = "production" # <-- Hinzugefügt
 
 class Participant(Base):
     __tablename__ = "participants"
@@ -65,7 +66,7 @@ class SettlementLine(Base):
     amount_eur: Mapped[float] = mapped_column(Float, nullable=False)  # + wir zahlen an Teilnehmer; - Teilnehmer schuldet
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     batch = relationship("SettlementBatch", back_populates="lines")
-    participant = relationship("Participant", back_populates="settlement_lines")
+    participant = relationship("Participant", back_back_populates="settlement_lines")
 
 class LedgerEntry(Base):
     __tablename__ = "ledger_entries"
