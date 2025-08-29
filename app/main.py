@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 import io
 import json
@@ -15,6 +14,7 @@ from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
 from .settle import apply_policy_and_settle
 from typing import List
+from collections import defaultdict # <-- Hinzugefügt
 
 # -----------------------------------------------------------------------------
 # App & Templates/Static
