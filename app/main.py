@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 import io
 import json
@@ -8,8 +7,7 @@ import pandas as pd
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from . import use_cases
 from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy
@@ -80,6 +78,8 @@ def to_float_safe(x) -> float:
 # -----------------------------------------------------------------------------
 # Routes
 # -----------------------------------------------------------------------------
+from fastapi.templating import Jinja2Templates  # placed here to avoid circular import above
+
 @app.get("/", response_class=HTMLResponse)
 def case_selector(request: Request):
     return templates.TemplateResponse(
@@ -89,7 +89,7 @@ def case_selector(request: Request):
 
 @app.get("/upload", response_class=HTMLResponse)
 def upload_page(request: Request, case: str = "mieterstrom"):
-    if case not in ("mieterstrom"):
+    if case != "mieterstrom":
         raise HTTPException(status_code=400, detail="Unknown case, only 'mieterstrom' is supported for this demo.")
     
     default_policy = use_cases.get_default_policy(case)
@@ -123,65 +123,74 @@ async def process_data(
         df = read_csv_robust(content)
         
         required_cols = ["timestamp", "participant_id", "participant_name", "role", "event_type", "quantity", "source"]
-        if not all(col in df.columns for col in required_cols):
-            missing = [col for col in required_cols if col not in df.columns]
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
             raise ValueError(f"Fehlende Spalten in der CSV-Datei: {', '.join(missing)}")
         
-        df['role'] = df['role'].str.strip().str.lower()
-        df['event_type'] = df['event_type'].str.strip().str.lower()
-        df['source'] = df['source'].str.strip().str.lower()
+        # Normalize strings
+        df['role'] = df['role'].astype(str).str.strip().str.lower()
+        df['event_type'] = df['event_type'].astype(str).str.strip().str.lower()
+        df['source'] = df['source'].astype(str).str.strip().str.lower()
         
         unique_participants = df[['participant_id', 'participant_name', 'role']].drop_duplicates()
-        
-        # Holen Sie alle Teilnehmer, die in der CSV vorkommen, aus der DB
+
+        # Load existing by external_id
         unique_ids = [str(uid) for uid in unique_participants['participant_id'].unique()]
-        existing_participants = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_ids)).all()}
+        existing = {p.external_id: p for p in db.query(Participant).filter(Participant.external_id.in_(unique_ids)).all()}
         
         new_participants_list = []
-        participant_map_dict = {}
+        participant_map_dict: dict[str, Participant] = {}
 
-        for index, row in unique_participants.iterrows():
+        for _, row in unique_participants.iterrows():
             ext_id = str(row['participant_id'])
             name_from_csv = row.get("participant_name", f"Participant {ext_id}")
-            role_from_csv = ParticipantRole(row["role"])
-            
-            p = existing_participants.get(ext_id)
+            role_str = row["role"]
+            try:
+                role_enum = ParticipantRole(role_str)
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Unbekannte Rolle in CSV: '{role_str}' (bei participant_id={ext_id})")
+
+            p = existing.get(ext_id)
             if p:
-                # Synchronisiere den Namen und die Rolle aus der CSV
+                # Sync name/role
                 if p.name != name_from_csv:
                     p.name = name_from_csv
                     db.add(p)
-                if p.role != role_from_csv:
-                    p.role = role_from_csv
+                if p.role != role_enum:
+                    p.role = role_enum
                     db.add(p)
             else:
                 p = Participant(
                     external_id=ext_id,
                     name=name_from_csv,
-                    role=role_from_csv
+                    role=role_enum
                 )
                 new_participants_list.append(p)
-            
             participant_map_dict[ext_id] = p
         
         if new_participants_list:
             db.add_all(new_participants_list)
         
-        db.flush() # Nötig, um IDs für neue Teilnehmer zu erhalten
-        
-        # Nun können wir die Events hinzufügen, da alle Teilnehmer-IDs bekannt sind
-        usage_events = []
+        db.flush()  # IDs für neue Teilnehmer
+
+        # Create UsageEvent rows
+        usage_events: list[UsageEvent] = []
         for _, row in df.iterrows():
             ext_id = str(row['participant_id'])
             p = participant_map_dict.get(ext_id)
             if not p:
                 raise HTTPException(status_code=500, detail=f"Teilnehmer mit ID {ext_id} nicht in der Datenbank gefunden.")
 
+            try:
+                et = EventType(row["event_type"])
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Unbekannter event_type in CSV: '{row['event_type']}' (participant_id={ext_id})")
+
             event = UsageEvent(
                 participant_id=p.id,
-                event_type=EventType(row["event_type"]),
+                event_type=et,
                 quantity=to_float_safe(row["quantity"]),
-                unit=row.get("unit", "kWh"),
+                unit=str(row.get("unit", "kWh")),
                 timestamp=row["timestamp"],
                 meta={
                     "source": row["source"],
@@ -193,84 +202,100 @@ async def process_data(
         db.add_all(usage_events)
         db.commit()
         
-        # Netting-Algorithmus ausführen
-        batch, result_data = apply_policy_and_settle(db, case, policy_body, usage_events)
+        # Settlement/Netting
+        batch, result_data, netting_stats = apply_policy_and_settle(db, case, policy_body, usage_events)
         
-        # NEU: Iteriere über alle Teilnehmer aus der CSV, nicht nur die, die am Netting beteiligt waren
+        # Rows (alle Parteien, inkl. Operator/External-Market)
         rows = []
-        sum_credit, sum_debit = 0.0, 0.0
-        
-        for index, row in unique_participants.iterrows():
-            ext_id = str(row['participant_id'])
-            p = participant_map_dict.get(ext_id)
-            
-            # Hole die Salden aus dem Ergebnis oder setze sie auf 0, falls der Teilnehmer keinen Geldfluss hatte
-            data = result_data.get(p.id, {'credit': 0.0, 'debit': 0.0, 'final_net': 0.0})
+        sum_credit = sum_debit = 0.0
+        id_to_participant = {p.id: p for p in db.query(Participant).all()}
 
-            credit = data.get('credit', 0.0)
-            debit = data.get('debit', 0.0)
+        for pid, data in result_data.items():
+            p = id_to_participant.get(pid)
+            credit = float(data.get('credit', 0.0))
+            debit  = float(data.get('debit', 0.0))
+            pre_net = credit - debit  # Brutto vor bilateralem Netting
+            post_net = float(data.get('final_net', pre_net))
             rows.append({
-                "name": p.name,
-                "role": p.role.value,
+                "name": p.name if p else f"#{pid}",
+                "role": (p.role.value if p else "unknown"),
                 "credit_eur": credit,
                 "debit_eur": debit,
-                "net_eur": data.get('final_net', credit - debit)
+                "pre_net_eur": pre_net,
+                "net_eur": post_net
             })
             sum_credit += credit
             sum_debit += debit
-        
+
         total_flow = sum_credit + sum_debit
-        net_flow = sum(abs(r['net_eur']) for r in rows)
+        net_flow_before = sum(abs(r['pre_net_eur']) for r in rows)
+        net_flow_after  = sum(abs(r['net_eur']) for r in rows)
+
+        # Transfers (Wer zahlt wem wie viel?)
+        transfers_ui = []
+        for deb_id, cred_id, amount in netting_stats.get('transfers_list', []):
+            deb = id_to_participant.get(deb_id)
+            cred = id_to_participant.get(cred_id)
+            transfers_ui.append({
+                "from": deb.name if deb else f"#{deb_id}",
+                "to": cred.name if cred else f"#{cred_id}",
+                "amount_eur": round(float(amount), 2)
+            })
         
         kpis = {
             'participants': len(rows),
             'sum_credit': sum_credit,
             'sum_debit': sum_debit,
-            'netting_efficiency': (1 - (net_flow / total_flow)) if total_flow > 0 else 0
+            'gross_exposure': total_flow,
+            'netting_efficiency': (1 - (net_flow_after / net_flow_before)) if net_flow_before > 1e-9 else 0,
+            'transfers_count': len(transfers_ui),
         }
 
-        # NEU: Detaillierte Erklärungen basierend auf den Rohdaten
+        # Erklärungen pro Teilnehmer (kurz gefixt: Base-Fee in EUR, Verbrauch PV vs. Netz getrennt)
         netting_explanations = []
-        raw_events_by_participant = df.groupby('participant_id')
-        
-        # NEU: Eine zentrale Liste mit allen Event-Details, um sie pro Teilnehmer zu filtern
-        detailed_events_list = df.to_dict('records')
+        detailed_records = df.to_dict('records')
+        by_pid = defaultdict(list)
+        for rec in detailed_records:
+            by_pid[str(rec['participant_id'])].append(rec)
 
-        for index, row in unique_participants.iterrows():
-            p_id = row['participant_id']
-            p_name = row['participant_name']
-            p_role = row['role']
-            
-            # Hole die Salden für den aktuellen Teilnehmer aus dem Ergebnis
-            p_data = result_data.get(participant_map_dict.get(p_id).id, {'credit': 0.0, 'debit': 0.0, 'final_net': 0.0})
-            
-            p_events = [e for e in detailed_events_list if e['participant_id'] == p_id]
-            
-            if p_events:
-                # Sammle die Event-Typen und Mengen
-                event_summary = defaultdict(float)
-                for event in p_events:
-                    event_type = event['event_type']
-                    quantity = to_float_safe(event['quantity'])
-                    event_summary[event_type] += quantity
-
-                # Erstelle die Erklärungs-Texte
-                explanation_parts = [f"**{p_name}** ({p_role})"]
-                for event_type, quantity in event_summary.items():
-                    explanation_parts.append(f"• hatte {quantity:.2f} kWh {event_type} ({p_events[0]['source']}).")
-                
-                # Füge die berechneten Salden hinzu
-                explanation_parts.append(f"Das ergibt eine Gutschrift von {p_data['credit']:.2f} € und eine Forderung von {p_data['debit']:.2f} €.")
-                
-                if p_data['final_net'] > 0.01:
-                    explanation_parts.append(f"**Nettosaldo: {p_data['final_net']:.2f} €** (Erhält eine Auszahlung).")
-                elif p_data['final_net'] < -0.01:
-                    explanation_parts.append(f"**Nettosaldo: {abs(p_data['final_net']):.2f} €** (Schuldet eine Zahlung).")
+        for ext_id, plist in by_pid.items():
+            p = participant_map_dict.get(ext_id)
+            if not p:
+                continue
+            sums = defaultdict(float)
+            for e in plist:
+                et = e['event_type']
+                src = e['source']
+                qty = to_float_safe(e['quantity'])
+                if et == 'consumption':
+                    key = f"consumption_{src}"
+                    sums[key] += qty
+                elif et == 'base_fee':
+                    sums['base_fee_eur'] += qty
                 else:
-                    explanation_parts.append("**Nettosaldo: 0.00 €** (Der Saldo ist perfekt ausgeglichen).")
+                    key = f"{et}_{src}"
+                    sums[key] += qty
 
-                netting_explanations.append(" ".join(explanation_parts))
-            
+            d = result_data.get(p.id, {'credit': 0.0, 'debit': 0.0, 'final_net': 0.0})
+            parts = [f"**{p.name}** ({p.role.value})"]
+            if sums.get('base_fee_eur'):
+                parts.append(f"• Grundgebühr: {sums['base_fee_eur']:.2f} €.")
+            if sums.get('consumption_local_pv'):
+                parts.append(f"• Lokaler PV-Bezug: {sums['consumption_local_pv']:.2f} kWh.")
+            if sums.get('consumption_grid_external'):
+                parts.append(f"• Netzbezug: {sums['consumption_grid_external']:.2f} kWh.")
+            credit = d['credit']
+            debit = d['debit']
+            parts.append(f"Das ergibt eine Gutschrift von {credit:.2f} € und eine Forderung von {debit:.2f} €.")
+            fn = d['final_net']
+            if fn > 0.01:
+                parts.append(f"**Nettosaldo: {fn:.2f} €** (Erhält eine Auszahlung).")
+            elif fn < -0.01:
+                parts.append(f"**Nettosaldo: {abs(fn):.2f} €** (Schuldet eine Zahlung).")
+            else:
+                parts.append("**Nettosaldo: 0.00 €** (Der Saldo ist perfekt ausgeglichen).")
+            netting_explanations.append(" ".join(parts))
+
         df_for_template = df.to_dict('records')
 
         return templates.TemplateResponse(
@@ -279,10 +304,11 @@ async def process_data(
                 "request": request,
                 "title": f"Ergebnis: {use_cases.get_use_case_title(case)}",
                 "batch_id": batch.id,
-                "rows": sorted(rows, key=lambda x: x['net_eur'], reverse=True),
+                "rows": sorted(rows, key=lambda x: x['pre_net_eur'], reverse=True),
                 "kpis": kpis,
-                "events_raw_data": df_for_template, 
-                "netting_explanations": netting_explanations
+                "events_raw_data": df_for_template,
+                "netting_explanations": netting_explanations,
+                "transfers": transfers_ui
             },
         )
     except Exception as e:

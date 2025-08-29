@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -10,7 +9,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL Umgebungsvariable ist nicht gesetzt.")
-# Railway liefert teils 'postgres://', SQLAlchemy erwartet 'postgresql://'
+# Railway/Heroku liefern teils 'postgres://', SQLAlchemy erwartet 'postgresql://'
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -18,12 +17,10 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 Base = declarative_base()
 
-
 def create_db_and_tables() -> None:
     """legt neue Tabellen an (migriert nicht bestehende)."""
     from . import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
-
 
 def get_db():
     db = SessionLocal()
@@ -32,72 +29,10 @@ def get_db():
     finally:
         db.close()
 
-
 # ---------------------------------------------------------------------
-# Mini-"Auto-Migration" (idempotent, ohne Bind-Parameter in DDL)
+# Mini-"Auto-Migration" (idempotent, für PoC)
 # ---------------------------------------------------------------------
-def _column_exists(conn, table: str, column: str) -> bool:
-    """Prüft ob eine Spalte in einer Tabelle existiert."""
-    row = conn.execute(
-        text("""
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = :t AND column_name = :c
-            LIMIT 1
-        """),
-        {"t": table, "c": column},
-    ).first()
-    return row is not None
-
-
-def _add_json_column_if_missing(conn, table: str, column: str):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} JSON'))
-    conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
-
-
-def _add_timestamptz_column_if_missing(conn, table: str, column: str):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ"))
-    conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
-
-
-def _add_float_column_if_missing(conn, table: str, column: str, default: float = 0.0):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE PRECISION"))
-    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
-
-
-def _add_integer_column_if_missing(conn, table: str, column: str, default: int = 0):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER"))
-    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
-
-
-def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
-    lit = default.replace("'", "''")
-    conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
-
-
-def _drop_column_if_exists(conn, table: str, column: str):
-    if _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
-
-
 def _enum_exists(conn, enum_name: str) -> bool:
-    """Prüft ob ein PostgreSQL Enum existiert."""
     row = conn.execute(
         text("""
             SELECT 1
@@ -109,9 +44,7 @@ def _enum_exists(conn, enum_name: str) -> bool:
     ).first()
     return row is not None
 
-
 def _enum_has_value(conn, enum_name: str, value: str) -> bool:
-    """Prüft ob ein Enum-Wert in einem PostgreSQL Enum existiert."""
     row = conn.execute(
         text("""
             SELECT 1
@@ -124,51 +57,86 @@ def _enum_has_value(conn, enum_name: str, value: str) -> bool:
     ).first()
     return row is not None
 
+def _ensure_enum_values(conn, enum_name: str, values: list[str]):
+    if not _enum_exists(conn, enum_name):
+        values_str = "', '".join(values)
+        conn.execute(text(f"CREATE TYPE {enum_name} AS ENUM ('{values_str}')"))
+        return
+    for v in values:
+        if not _enum_has_value(conn, enum_name, v):
+            conn.execute(text(f"ALTER TYPE {enum_name} ADD VALUE '{v}'"))
 
-def _ensure_eventtype_enum(conn):
-    """Stellt sicher, dass der eventtype Enum alle benötigten Werte hat."""
-    # Füge 'VPP_SALE' hier zur Liste hinzu
-    required_values = ['GENERATION','CONSUMPTION','GRID_FEED','BASE_FEE','BATTERY_CHARGE','PRODUCTION','VPP_SALE','BATTERY_DISCHARGE']
-    if not _enum_exists(conn, 'eventtype'):
-        # Enum erstellen falls nicht vorhanden
-        values_str = "', '".join(required_values)
-        conn.execute(text(f"CREATE TYPE eventtype AS ENUM ('{values_str}')"))
-        print("Created eventtype enum with all values")
-    else:
-        # Fehlende Werte hinzufügen
-        for value in required_values:
-            if not _enum_has_value(conn, 'eventtype', value):
-                conn.execute(text(f"ALTER TYPE eventtype ADD VALUE '{value}'"))
-                print(f"Added '{value}' to eventtype enum")
+def _column_exists(conn, table: str, column: str) -> bool:
+    row = conn.execute(
+        text("""
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = :t AND column_name = :c
+            LIMIT 1
+        """),
+        {"t": table, "c": column},
+    ).first()
+    return row is not None
 
+def _add_json_column_if_missing(conn, table: str, column: str):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} JSON'))
+    conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
-def _ensure_participantrole_enum(conn):
-    """Stellt sicher, dass der participantrole Enum alle benötigten Werte hat."""
-    required_values = ['PROSUMER','CONSUMER','LANDLORD','TENANT','OPERATOR','COMMUNITY_FEE_COLLECTOR','COMMERCIAL','EXTERNAL_MARKET']
-    
-    if not _enum_exists(conn, 'participantrole'):
-        # Enum erstellen falls nicht vorhanden
-        values_str = "', '".join(required_values)
-        conn.execute(text(f"CREATE TYPE participantrole AS ENUM ('{values_str}')"))
-        print("Created participantrole enum with all values")
-    else:
-        # Fehlende Werte hinzufügen
-        for value in required_values:
-            if not _enum_has_value(conn, 'participantrole', value):
-                conn.execute(text(f"ALTER TYPE participantrole ADD VALUE '{value}'"))
-                print(f"Added '{value}' to participantrole enum")
+def _add_timestamptz_column_if_missing(conn, table: str, column: str):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ"))
+    conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
+def _add_float_column_if_missing(conn, table: str, column: str, default: float = 0.0):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE PRECISION"))
+    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+
+def _add_integer_column_if_missing(conn, table: str, column: str, default: int = 0):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER"))
+    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+
+def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
+    if not _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
+    lit = default.replace("'", "''")
+    conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
+    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+
+def _drop_column_if_exists(conn, table: str, column: str):
+    if _column_exists(conn, table, column):
+        conn.execute(text(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}"))
 
 def ensure_min_schema():
     """
-    Heilt Schema-Drift für PoC-Tabellen:
+    Heilt Schema-Drift für PoC-Tabellen (Enums + fehlende Spalten).
+    Enums/Werte in lowercase, passend zu Python-Enum-Werten & CSV.
     """
+    from . import models  # noqa: F401
+
     with engine.begin() as conn:
-        # ZUERST die Enums sicherstellen
-        _ensure_eventtype_enum(conn)
-        _ensure_participantrole_enum(conn)
-        
-        # policies minimal sichern
+        # Enums sicherstellen (lowercase values)
+        _ensure_enum_values(conn, 'eventtype', [
+            'generation', 'consumption', 'grid_feed', 'base_fee',
+            'battery_charge', 'production', 'vpp_sale', 'battery_discharge'
+        ])
+        _ensure_enum_values(conn, 'participantrole', [
+            'prosumer', 'consumer', 'landlord', 'tenant', 'operator',
+            'commercial', 'community_fee_collector', 'external_market'
+        ])
+
+        # policies
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS policies (
                 id SERIAL PRIMARY KEY,
@@ -179,16 +147,16 @@ def ensure_min_schema():
         _add_timestamptz_column_if_missing(conn, "policies", "created_at")
         _drop_column_if_exists(conn, "policies", "definition")
 
-        # settlement_batches sichern
+        # settlement_batches
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS settlement_batches (
                 id SERIAL PRIMARY KEY
             );
         """))
-        _add_varchar_column_if_missing(conn, "settlement_batches", "use_case", "energy_community")
+        _add_varchar_column_if_missing(conn, "settlement_batches", "use_case", "mieterstrom")
         _add_timestamptz_column_if_missing(conn, "settlement_batches", "created_at")
 
-        # settlement_lines sichern
+        # settlement_lines
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS settlement_lines (
                 id SERIAL PRIMARY KEY
@@ -196,11 +164,10 @@ def ensure_min_schema():
         """))
         _add_integer_column_if_missing(conn, "settlement_lines", "participant_id", 0)
         _add_integer_column_if_missing(conn, "settlement_lines", "batch_id", 0)
-        _add_float_column_if_missing(conn, "settlement_lines", "amount", 0.0)
         _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)
         _add_varchar_column_if_missing(conn, "settlement_lines", "description", "")
 
-        # usage_events fehlende Spalten nachrüsten
+        # usage_events
         _add_float_column_if_missing(conn,   "usage_events", "quantity", 0.0)
         _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")
         if not _column_exists(conn, "usage_events", "meta"):

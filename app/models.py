@@ -5,13 +5,14 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from .db import Base
 
+# Enums nutzen lowercase-Strings (passen zu CSV)
 class ParticipantRole(enum.Enum):
     PROSUMER = "prosumer"
     CONSUMER = "consumer"
     LANDLORD = "landlord"
     TENANT = "tenant"
     OPERATOR = "operator"
-    COMMERCIAL = "commercial" 
+    COMMERCIAL = "commercial"
     COMMUNITY_FEE_COLLECTOR = "community_fee_collector"
     EXTERNAL_MARKET = "external_market"
 
@@ -22,7 +23,7 @@ class EventType(enum.Enum):
     GRID_FEED = "grid_feed"
     BATTERY_CHARGE = "battery_charge"
     PRODUCTION = "production"
-    VPP_SALE = "vpp_sale" # <-- Hinzugefügt
+    VPP_SALE = "vpp_sale"
     BATTERY_DISCHARGE = "battery_discharge"
 
 class Participant(Base):
@@ -30,7 +31,7 @@ class Participant(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     external_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    role: Mapped[ParticipantRole] = mapped_column(Enum(ParticipantRole), nullable=False)
+    role: Mapped[ParticipantRole] = mapped_column(Enum(ParticipantRole, name="participantrole"), nullable=False)
 
     events = relationship("UsageEvent", back_populates="participant", cascade="all, delete-orphan")
     settlement_lines = relationship("SettlementLine", back_populates="participant", cascade="all, delete-orphan")
@@ -40,7 +41,7 @@ class UsageEvent(Base):
     __tablename__ = "usage_events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"))
-    event_type: Mapped[EventType] = mapped_column(Enum(EventType), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="eventtype"), nullable=False)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)  # kWh oder EUR bei BASE_FEE
     unit: Mapped[str] = mapped_column(String, nullable=False, default="kWh")
     meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -82,4 +83,3 @@ class LedgerEntry(Base):
     timestamp: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     participant = relationship("Participant", back_populates="ledger_entries")
-

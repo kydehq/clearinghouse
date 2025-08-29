@@ -1,6 +1,4 @@
-# app/audit.py
 from __future__ import annotations
-
 import json
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -12,7 +10,7 @@ def get_audit_data(db: Session, batch_id: int) -> dict:
     if not batch:
         raise HTTPException(status_code=404, detail=f"Settlement Batch mit ID {batch_id} nicht gefunden.")
 
-    # Zugehörige Policy finden (die letzte vor Batch-Erstellung für diesen Use Case)
+    # Zugehörige (letzte) Policy vor Batch-Erstellung
     policy = (
         db.query(models.Policy)
         .filter(models.Policy.use_case == batch.use_case)

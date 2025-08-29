@@ -1,4 +1,3 @@
-# app/settle.py
 from __future__ import annotations
 from typing import Dict, Iterable, Tuple, List
 from collections import defaultdict
@@ -10,14 +9,12 @@ from .models import (
 
 EPS = 1e-9
 
-
 def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float]]:
     """
-    Führt bilaterales Netting zwischen Teilnehmern durch.
-
+    Bilaterales Netting: reduziert Zahlungsströme auf minimale Transfers.
     Returns:
-    - final_balances: {participant_id: net_amount} nach Cross-Participant Netting
-    - netting_stats: Statistiken über die Netting-Effizienz
+    - final_balances: {participant_id: net_amount}
+    - netting_stats: Kennzahlen + Transferliste (debtor, creditor, amount)
     """
     internal_netted = {}
     total_abs_before_internal = 0.0
@@ -75,7 +72,6 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
     }
     return final_balances, netting_stats
 
-
 def _ensure_external_market(db: Session) -> Participant:
     """Sorgt dafür, dass ein External-Market-Teilnehmer existiert."""
     external = db.query(Participant).filter(Participant.role == ParticipantRole.EXTERNAL_MARKET).first()
@@ -90,24 +86,19 @@ def _ensure_external_market(db: Session) -> Participant:
     db.flush()
     return external
 
-
 def apply_policy_and_settle(
     db: Session,
     use_case: str,
     policy_body: dict,
     events: Iterable[UsageEvent]
-) -> Tuple[SettlementBatch, Dict]:
+) -> Tuple[SettlementBatch, Dict, Dict]:
     """
-    Double-Entry-Settlement für Mieterstrom:
-    - local_pv/battery -> Mieter/GEWERBE zahlen an LANDLORD (lokaler PV-Preis aus Policy).
-    - grid_external   -> Mieter/GEWERBE zahlen an EXTERNAL_MARKET (Spot/CSV-Preis).
-    - grid_feed       -> EXTERNAL_MARKET zahlt an LANDLORD (Einspeise-Preis).
-    - vpp_sale        -> EXTERNAL_MARKET zahlt an LANDLORD (VPP-Preis).
-    - base_fee (EUR)  -> Mieter/GEWERBE zahlen an OPERATOR.
-
-    PRODUCTION/GNERATION sind physikalisch (kein Geldfluss). BATTERY_CHARGE:
-      - qty > 0 & source=grid_external  -> LANDLORD zahlt an EXTERNAL_MARKET (Ladekosten).
-      - qty <= 0 (Discharge) / source=local_pv -> kein Geldfluss.
+    Double-Entry-Settlement (Mieterstrom):
+      - local_pv/battery -> TENANT/COMMERCIAL zahlen an LANDLORD (Policy-Preis).
+      - grid_external    -> TENANT/COMMERCIAL zahlen an EXTERNAL_MARKET (Spot aus CSV).
+      - grid_feed        -> EXTERNAL_MARKET zahlt an LANDLORD (Einspeise-Preis).
+      - vpp_sale         -> EXTERNAL_MARKET zahlt an LANDLORD (VPP-Preis).
+      - base_fee (EUR)   -> TENANT/COMMERCIAL zahlen an OPERATOR.
     """
     if use_case != 'mieterstrom':
         raise ValueError(f"Unbekannter use_case: {use_case}")
@@ -140,24 +131,23 @@ def apply_policy_and_settle(
         if p.role in (ParticipantRole.TENANT, ParticipantRole.COMMERCIAL):
             if ev.event_type == EventType.CONSUMPTION and qty > EPS:
                 if src in ('local_pv', 'battery', 'local_battery'):
-                    # Local PV/Battery: Mieter -> Landlord
+                    # Local PV/Batterie: Mieter -> Landlord
                     cost = qty * local_pv_price
                     result[p.id]['debit'] += cost
                     result[landlord.id]['credit'] += cost
-                elif src == 'grid_external' or src == 'grid':
+                elif src in ('grid_external', 'grid'):
                     # Grid: Mieter -> External Market (Spot aus CSV)
-                    price = price_meta
-                    cost = qty * price
+                    cost = qty * price_meta
                     result[p.id]['debit'] += cost
                     result[external.id]['credit'] += cost
                 else:
-                    # Fallback: behandle wie Grid mit vorhandenen Preisinfos (ggf. 0)
+                    # Fallback: behandle wie Grid mit vorhandenem Preis (ggf. 0)
                     cost = qty * price_meta
                     result[p.id]['debit'] += cost
                     result[external.id]['credit'] += cost
 
             elif ev.event_type == EventType.BASE_FEE and operator:
-                # BASE_FEE ist bereits EUR in 'quantity'
+                # BASE_FEE ist EUR in 'quantity'
                 amount_eur = qty
                 if abs(amount_eur) > EPS:
                     result[p.id]['debit'] += amount_eur
@@ -180,27 +170,27 @@ def apply_policy_and_settle(
                 result[external.id]['debit'] += revenue
 
             elif ev.event_type == EventType.BATTERY_CHARGE:
-                # Positive qty = Charge, negative qty = Discharge (kein Geldfluss)
+                # Positive qty = Charge, negative qty = Discharge (kein Geldfluss für Discharge)
                 if qty > EPS and src in ('grid_external', 'grid'):
                     # Landlord kauft Strom vom Markt zum Laden
-                    price = price_meta
-                    cost = qty * price
+                    cost = qty * price_meta
                     result[p.id]['debit'] += cost
                     result[external.id]['credit'] += cost
-                # Charge aus local_pv -> kein Geldfluss; Discharge -> auch kein Geldfluss hier
+                # Charge aus local_pv -> kein Geldfluss; Discharge -> kein Geldfluss hier
 
             elif ev.event_type in (EventType.PRODUCTION, EventType.GENERATION):
                 # Nur physikalisch, kein Geldfluss
                 pass
 
-        # Optional: Weitere Rollen/Events hier ergänzen (z.B. COMMUNITY_FEE_COLLECTOR etc.)
+        # Weitere Rollen bei Bedarf ergänzen
 
     # 2) Bilaterales Netting anwenden
     final_balances, netting_stats = apply_bilateral_netting(result)
 
     # 3) Teilnehmer-Result für UI zusammenstellen
     participant_result: Dict[int, Dict[str, float]] = {}
-    for pid in result.keys() | final_balances.keys():
+    all_ids = set(result.keys()) | set(final_balances.keys())
+    for pid in all_ids:
         credit = result.get(pid, {}).get('credit', 0.0)
         debit = result.get(pid, {}).get('debit', 0.0)
         participant_result[pid] = {
@@ -228,4 +218,4 @@ def apply_policy_and_settle(
     db.commit()
     db.refresh(batch)
 
-    return batch, participant_result
+    return batch, participant_result, netting_stats
