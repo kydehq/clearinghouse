@@ -52,6 +52,53 @@ class SettlePayload(BaseModel):
     end_time: Optional[datetime] = None
     community_id: Optional[str] = None
 
+# ---------- Helper Functions ----------
+def _generate_human_readable_explanation(participant, events, final_amount, use_case):
+    """Generiert eine kurze, menschlich lesbare Zusammenfassung."""
+    
+    role_descriptions = {
+        'tenant': 'Mieter',
+        'commercial': 'Gewerbemieter', 
+        'landlord': 'Vermieter',
+        'operator': 'Betreiber',
+        'external_market': 'Externer Markt'
+    }
+    
+    role_name = role_descriptions.get(participant.role.value, participant.role.value)
+    
+    if not events:
+        return f"{participant.name} ({role_name}) hat keine Events im Abrechnungszeitraum. Finalbetrag: {final_amount:.2f} EUR"
+    
+    # Schnelle Zusammenfassung der wichtigsten Aktivitäten
+    consumption_local = sum(e.quantity for e in events if e.event_type.value == 'consumption' and e.meta.get('source', '').lower() in ['local_pv', 'battery'])
+    consumption_grid = sum(e.quantity for e in events if e.event_type.value == 'consumption' and e.meta.get('source', '').lower() not in ['local_pv', 'battery'])
+    generation = sum(e.quantity for e in events if e.event_type.value in ['generation', 'grid_feed'])
+    base_fee_total = sum(e.quantity for e in events if e.event_type.value == 'base_fee')
+    
+    summary = f"{participant.name} ({role_name}): "
+    
+    activities = []
+    if consumption_local > 0:
+        activities.append(f"{consumption_local:.1f} kWh lokaler Strom")
+    if consumption_grid > 0:
+        activities.append(f"{consumption_grid:.1f} kWh Netzstrom")
+    if generation > 0:
+        activities.append(f"{generation:.1f} kWh erzeugt/eingespeist")
+    if base_fee_total > 0:
+        activities.append(f"{base_fee_total:.2f} EUR Grundgebühr")
+    
+    if activities:
+        summary += ", ".join(activities) + ". "
+    
+    if final_amount > 0:
+        summary += f"Zahlt {final_amount:.2f} EUR."
+    elif final_amount < 0:
+        summary += f"Erhält {abs(final_amount):.2f} EUR."
+    else:
+        summary += "Ausgeglichen (0 EUR)."
+    
+    return summary
+
 # ---------- Startup ----------
 @app.on_event("startup")
 def on_startup():
@@ -189,8 +236,13 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
         
         lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
         
-        # Korrektur: Hole alle Events und filtere sie
-        all_events = db.query(UsageEvent).all()
+        # Hole Events aus dem Zeitraum des Batches
+        batch_start = batch.created_at - timedelta(days=2)  # Annahme: Events der letzten 2 Tage
+        batch_end = batch.created_at
+        relevant_events = db.query(UsageEvent).filter(
+            UsageEvent.timestamp.between(batch_start, batch_end)
+        ).all()
+        
         all_participants = {p.id: p for p in db.query(Participant).all()}
         
         audit_data = {
@@ -209,25 +261,40 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
             }
             recreated_hash = create_transaction_hash(transaction_data)
             
+            participant = all_participants.get(line.participant_id)
+            
             line_data = {
                 "line_id": line.id,
                 "participant_id": line.participant_id,
+                "participant_name": participant.name if participant else "Unbekannt",
+                "participant_role": participant.role.value if participant else "Unbekannt",
                 "amount_eur": line.amount_eur,
                 "description": line.description,
                 "proof_hash": line.proof_hash,
                 "is_verified": (recreated_hash == line.proof_hash)
             }
             
-            if explain:
-                explanation = []
-                for event in all_events:
-                    if event.participant_id == line.participant_id:
-                        participant = all_participants.get(event.participant_id)
-                        # Korrektur: Access the correct value from the Enum
-                        explanation.append(
-                            f"Event: {event.event_type.value.capitalize()} von {participant.name} ({participant.role.value}), Menge: {event.quantity} {event.unit}, Preis: {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh."
-                        )
-                line_data["explanation"] = explanation
+            if explain and participant:
+                # Finde Events für diesen Teilnehmer
+                participant_events = [e for e in relevant_events if e.participant_id == line.participant_id]
+                
+                human_readable = _generate_human_readable_explanation(
+                    participant, participant_events, line.amount_eur, batch.use_case
+                )
+                line_data["human_readable_explanation"] = human_readable
+                
+                # Behalte auch die technischen Event-Details für Transparenz
+                technical_events = []
+                for event in participant_events:
+                    technical_events.append({
+                        "event_type": event.event_type.value,
+                        "quantity": event.quantity,
+                        "unit": event.unit,
+                        "source": event.meta.get('source', 'unknown'),
+                        "price_eur_per_kwh": event.meta.get('price_eur_per_kwh', 0),
+                        "timestamp": event.timestamp.isoformat()
+                    })
+                line_data["technical_events"] = technical_events
             
             audit_data["settlement_lines"].append(line_data)
             
@@ -236,3 +303,50 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _generate_human_readable_explanation(participant, events, final_amount, use_case):
+    """Generiert eine kurze, menschlich lesbare Zusammenfassung."""
+    
+    role_descriptions = {
+        'tenant': 'Mieter',
+        'commercial': 'Gewerbemieter', 
+        'landlord': 'Vermieter',
+        'operator': 'Betreiber',
+        'external_market': 'Externer Markt'
+    }
+    
+    role_name = role_descriptions.get(participant.role.value, participant.role.value)
+    
+    if not events:
+        return f"{participant.name} ({role_name}) hat keine Events im Abrechnungszeitraum. Finalbetrag: {final_amount:.2f} EUR"
+    
+    # Schnelle Zusammenfassung der wichtigsten Aktivitäten
+    consumption_local = sum(e.quantity for e in events if e.event_type.value == 'consumption' and e.meta.get('source', '').lower() in ['local_pv', 'battery'])
+    consumption_grid = sum(e.quantity for e in events if e.event_type.value == 'consumption' and e.meta.get('source', '').lower() not in ['local_pv', 'battery'])
+    generation = sum(e.quantity for e in events if e.event_type.value in ['generation', 'grid_feed'])
+    base_fee_total = sum(e.quantity for e in events if e.event_type.value == 'base_fee')
+    
+    summary = f"{participant.name} ({role_name}): "
+    
+    activities = []
+    if consumption_local > 0:
+        activities.append(f"{consumption_local:.1f} kWh lokaler Strom")
+    if consumption_grid > 0:
+        activities.append(f"{consumption_grid:.1f} kWh Netzstrom")
+    if generation > 0:
+        activities.append(f"{generation:.1f} kWh erzeugt/eingespeist")
+    if base_fee_total > 0:
+        activities.append(f"{base_fee_total:.2f} EUR Grundgebühr")
+    
+    if activities:
+        summary += ", ".join(activities) + ". "
+    
+    if final_amount > 0:
+        summary += f"Zahlt {final_amount:.2f} EUR."
+    elif final_amount < 0:
+        summary += f"Erhält {abs(final_amount):.2f} EUR."
+    else:
+        summary += "Ausgeglichen (0 EUR)."
+    
+    return summary
