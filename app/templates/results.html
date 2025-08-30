@@ -64,7 +64,6 @@
         Von Tausenden 15-Minuten-Messwerten zu wenigen Zahlungen – transparent, auditierbar, netting-optimiert.
       </p>
 
-      <!-- KPIs -->
       <div class="kpi-grid">
         <div class="kpi-card"><div class="kpi-label">Brutto-Exposure (vor Netting)</div><div class="kpi-value">€ {{ '%.2f'|format(kpis.gross_exposure|default(0)) }}</div></div>
         <div class="kpi-card"><div class="kpi-label">Summe Credits</div><div class="kpi-value">€ {{ '%.2f'|format(kpis.sum_credit|default(0)) }}</div></div>
@@ -75,7 +74,6 @@
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mt-8">
-        <!-- LEFT: Raw Data -->
         <div>
           <h2 class="text-2xl font-bold text-gray-800 mb-2">Rohdaten: Das manuelle Problem</h2>
           <p class="text-gray-600 mb-4">15-Minuten-Intervalle, dynamische Preise, lokale PV/Batterie & Netz – manuell kaum fehlerfrei abrechenbar.</p>
@@ -102,7 +100,6 @@
           <p class="text-sm text-gray-500 mt-2">*Auszug. Rundungen können minimale Abweichungen erzeugen.</p>
         </div>
 
-        <!-- RIGHT: Results -->
         <div>
           <h2 class="text-2xl font-bold text-kydeGreen mb-1">KYDE-Settlement: Die automatisierte Lösung</h2>
           <p class="text-gray-600 mb-4">
@@ -117,7 +114,6 @@
           </div>
           {% endif %}
 
-          <!-- Vor Netting -->
           <div class="mt-4">
             <h3 class="text-lg font-semibold">Vor Netting (Brutto-Exposures)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
@@ -138,7 +134,6 @@
             </div>
           </div>
 
-          <!-- Zahlungsplan -->
           <div class="mt-6">
             <h3 class="text-lg font-semibold">Zahlungsplan (nach Netting)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
@@ -157,7 +152,6 @@
             </div>
           </div>
 
-          <!-- Nach Netting -->
           <div class="mt-6">
             <h3 class="text-lg font-semibold">Nach Netting (finale Nettosalden)</h3>
             <div class="overflow-x-auto bg-white rounded-lg shadow border border-gray-200" style="max-height: 220px;">
