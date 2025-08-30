@@ -84,6 +84,7 @@ def _add_integer_column_if_missing(conn, table: str, column: str, default: int =
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
+    """Generisch für NICHT-UNIQUE Felder. Für participants.external_id NICHT benutzen!"""
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
     lit = default.replace("'", "''")
@@ -91,13 +92,29 @@ def _add_varchar_column_if_missing(conn, table: str, column: str, default: str =
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
     conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
-def _add_enum_column_if_missing(conn, table: str, column: str, enum_type: str, default_value: str):
-    if not _column_exists(conn, table, column):
-        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {enum_type}"))
-    # backfill + defaults
-    conn.execute(text(f"UPDATE {table} SET {column} = :dv::" + enum_type + f" WHERE {column} IS NULL"), {"dv": default_value})
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT :dv::" + enum_type), {"dv": default_value})
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+def _ensure_participants_external_id(conn):
+    """
+    Spezialbehandlung für participants.external_id:
+    - Spalte anlegen falls fehlt
+    - NULL oder '' auf eindeutiges 'migrated-{id}' setzen
+    - NOT NULL setzen
+    - KEIN zusätzlicher Unique-Index (wir gehen von bestehendem aus)
+    """
+    if not _column_exists(conn, "participants", "external_id"):
+        conn.execute(text("ALTER TABLE participants ADD COLUMN external_id VARCHAR"))
+
+    # Eindeutig backfillen (vermeidet Kollision mit Unique-Index)
+    conn.execute(text("""
+        UPDATE participants
+        SET external_id = 'migrated-' || id
+        WHERE external_id IS NULL OR external_id = ''
+    """))
+
+    # Not Null erst NACH Backfill
+    conn.execute(text("ALTER TABLE participants ALTER COLUMN external_id SET NOT NULL"))
+
+    # Falls du unbedingt einen Index sicherstellen willst, mach das manuell per SQL außerhalb.
+    # Hier kein automatisches CREATE UNIQUE INDEX, um Doppel-Indexes zu vermeiden.
 
 def ensure_min_schema():
     """Enums/Tables/Spalten sicherstellen + Werte normalisieren."""
@@ -112,7 +129,7 @@ def ensure_min_schema():
             "commercial", "community_fee_collector", "external_market"
         ])
 
-        # Tables (stub anlegen, Spalten folgen separat)
+        # Tables (Stub)
         conn.execute(text("CREATE TABLE IF NOT EXISTS participants (id SERIAL PRIMARY KEY)"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS usage_events (id SERIAL PRIMARY KEY)"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS policies (id SERIAL PRIMARY KEY)"))
@@ -121,17 +138,21 @@ def ensure_min_schema():
         conn.execute(text("CREATE TABLE IF NOT EXISTS ledger_entries (id SERIAL PRIMARY KEY)"))
 
         # participants
-        _add_varchar_column_if_missing(conn, "participants", "external_id", "")
         _add_varchar_column_if_missing(conn, "participants", "name", "")
-        _add_enum_column_if_missing(conn, "participants", "role", "participantrole", "consumer")
-        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS participants_external_id_idx ON participants(external_id)"))
+        # external_id: eigene Routine (kein ''-Backfill!)
+        _ensure_participants_external_id(conn)
+        # HINWEIS: keinen zusätzlichen Unique-Index hier erzeugen
 
         # usage_events
         _add_integer_column_if_missing(conn, "usage_events", "participant_id", 0)
         if not _column_exists(conn, "usage_events", "meta"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN meta JSON"))
         conn.execute(text("ALTER TABLE usage_events ALTER COLUMN meta SET DEFAULT '{}'::json"))
-        _add_enum_column_if_missing(conn, "usage_events", "event_type", "eventtype", "consumption")
+        # event_type als Enum sicherstellen
+        if not _column_exists(conn, "usage_events", "event_type"):
+            conn.execute(text("ALTER TABLE usage_events ADD COLUMN event_type eventtype"))
+            conn.execute(text("UPDATE usage_events SET event_type = 'consumption'::eventtype WHERE event_type IS NULL"))
+        conn.execute(text("ALTER TABLE usage_events ALTER COLUMN event_type SET NOT NULL"))
         _add_float_column_if_missing(conn, "usage_events", "quantity", 0.0)
         _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")
         _add_timestamptz_column_if_missing(conn, "usage_events", "timestamp")
@@ -162,7 +183,6 @@ def ensure_min_schema():
         _add_varchar_column_if_missing(conn, "ledger_entries", "transaction_hash", "")
 
         # ---- Daten normalisieren (wichtiger Teil) ----
-        # Mögliche Altlasten in Großbuchstaben auf lowercase-Enums mappen
         conn.execute(text("""
             UPDATE participants
             SET role = LOWER(role::text)::participantrole
