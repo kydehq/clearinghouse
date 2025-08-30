@@ -135,6 +135,29 @@ def ensure_min_schema():
         _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)
         _add_varchar_column_if_missing(conn, "settlement_lines", "description", "")
 
+        def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
+            if not _column_exists(conn, table, column):
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
+            lit = default.replace("'", "''")
+            conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
+            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
+            conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+
+        def ensure_min_schema():
+            """Heilt Schema-Drift für PoC-Tabellen (Enums + fehlende Spalten)."""
+            from . import models  # noqa
+
+            with engine.begin() as conn:
+      
+        
+            # settlement_lines
+             _add_integer_column_if_missing(conn, "settlement_lines", "participant_id", 0)
+             _add_integer_column_if_missing(conn, "settlement_lines", "batch_id", 0)
+             _add_float_column_if_missing(conn, "settlement_lines", "amount_eur", 0.0)
+             _add_varchar_column_if_missing(conn, "settlement_lines", "description", "")
+             _add_varchar_column_if_missing(conn, "settlement_lines", "proof_hash", "") # NEW LINE
+        
+
         # usage_events
         _add_float_column_if_missing(conn,   "usage_events", "quantity", 0.0)
         _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")

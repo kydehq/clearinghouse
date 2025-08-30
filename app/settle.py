@@ -6,8 +6,16 @@ from .models import (
     Participant, UsageEvent, SettlementBatch, SettlementLine,
     ParticipantRole, EventType
 )
+import hashlib
+import json
 
 EPS = 1e-9
+
+def create_transaction_hash(data: Dict) -> str:
+    """Creates a SHA-256 hash for a given transaction data."""
+    # Ensure data is sorted to create a consistent hash
+    sorted_data = json.dumps(data, sort_keys=True)
+    return hashlib.sha256(sorted_data.encode('utf-8')).hexdigest()
 
 def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float], List[Dict]]:
     """Bilaterales Netting zur Reduktion von Zahlungen."""
@@ -162,15 +170,31 @@ def apply_policy_and_settle(
         }
 
     batch = SettlementBatch(use_case=use_case)
-    db.add(batch); db.flush()
+    db.add(batch)
+    db.flush()
+    db.refresh(batch) # Get batch ID
+
+    # Create and store SettlementLines with unique hashes
     for pid, final_net in final_balances.items():
         if abs(final_net) < EPS: continue
+
+        # The data for the hash is the transaction itself
+        transaction_data = {
+            "batch_id": batch.id,
+            "participant_id": pid,
+            "amount_eur": round(final_net, 2),
+            "description": f"Final net balance for {use_case}"
+        }
+        transaction_hash = create_transaction_hash(transaction_data)
+
         db.add(SettlementLine(
             batch_id=batch.id,
             participant_id=pid,
             amount_eur=round(final_net, 2),
             description=f"Net after bilateral netting ({use_case})",
+            proof_hash=transaction_hash # Store the hash here
         ))
-    db.commit(); db.refresh(batch)
+    
+    db.commit()
 
     return batch, participant_result, netting_stats

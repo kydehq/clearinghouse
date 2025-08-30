@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 from collections import defaultdict
 from typing import List, Optional
+import hashlib
 
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -15,8 +16,8 @@ from datetime import datetime
 
 from . import use_cases
 from .db import create_db_and_tables, get_db, ensure_min_schema
-from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, LedgerEntry
-from .settle import apply_policy_and_settle, apply_bilateral_netting
+from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, SettlementLine
+from .settle import apply_policy_and_settle, apply_bilateral_netting, create_transaction_hash
 from .audit import get_audit_data
 
 # ---------- App / Templates ----------
@@ -39,6 +40,13 @@ class EventPayload(BaseModel):
     price_eur_per_kwh: Optional[float] = 0.0
 
 class NettingPreviewPayload(BaseModel):
+    use_case: str
+    policy_body: dict
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    community_id: Optional[str] = None
+
+class SettlePayload(BaseModel):
     use_case: str
     policy_body: dict
     start_time: Optional[datetime] = None
@@ -151,13 +159,67 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-# ---------- UI Routes to be removed ----------
-# Diese Routen sind für den API-First-Flow nicht mehr nötig und werden entfernt.
-# @app.get("/upload", response_class=HTMLResponse)
-# ...
-# @app.post("/process_data", response_class=HTMLResponse)
-# ...
-# @app.get("/audit", response_class=HTMLResponse)
-# ...
-# @app.get("/start")
-# ...
+
+@app.post("/v1/settle/execute", response_class=JSONResponse)
+def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
+    try:
+        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(payload.start_time, payload.end_time)).all()
+        if not events:
+            return JSONResponse(status_code=200, content={"message": "No events found to settle."})
+        
+        # This will create and store the batch with the settlement lines and proof hashes
+        batch, result_data, netting_stats = apply_policy_and_settle(db, payload.use_case, payload.policy_body, events)
+        
+        return JSONResponse(content={
+            "status": "success",
+            "batch_id": batch.id,
+            "message": "Settlement executed and proofs generated.",
+            "final_net_balances": {
+                p.external_id: round(result_data[p.id]['final_net'], 2)
+                for p in db.query(Participant).filter(Participant.id.in_(result_data.keys())).all()
+            }
+        })
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
+def audit_batch(batch_id: int, db: Session = Depends(get_db)):
+    try:
+        batch = db.query(SettlementBatch).filter(SettlementBatch.id == batch_id).first()
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch not found.")
+        
+        lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
+        
+        audit_data = {
+            "batch_id": batch.id,
+            "use_case": batch.use_case,
+            "created_at": batch.created_at.isoformat(),
+            "settlement_lines": []
+        }
+        
+        for line in lines:
+            # Recreate hash to verify integrity
+            transaction_data = {
+                "batch_id": line.batch_id,
+                "participant_id": line.participant_id,
+                "amount_eur": line.amount_eur,
+                "description": line.description
+            }
+            recreated_hash = create_transaction_hash(transaction_data)
+            
+            audit_data["settlement_lines"].append({
+                "line_id": line.id,
+                "participant_id": line.participant_id,
+                "amount_eur": line.amount_eur,
+                "description": line.description,
+                "proof_hash": line.proof_hash,
+                "is_verified": (recreated_hash == line.proof_hash) # The core check!
+            })
+            
+        return JSONResponse(content=audit_data)
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

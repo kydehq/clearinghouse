@@ -69,6 +69,7 @@ class SettlementLine(Base):
     participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"))
     amount_eur: Mapped[float] = mapped_column(Float, nullable=False)  # + wir zahlen an Teilnehmer; - Teilnehmer schuldet
     description: Mapped[str | None] = mapped_column(String, nullable=True)
+    proof_hash: Mapped[str | None] = mapped_column(String(64), nullable=True) # New Field!
     batch = relationship("SettlementBatch", back_populates="lines")
     participant = relationship("Participant", back_populates="settlement_lines")
 
