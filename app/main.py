@@ -57,11 +57,6 @@ class SettlePayload(BaseModel):
 @app.on_event("startup")
 def on_startup():
     print("DB init...")
-    # This is where the issue was. The functions were not imported.
-    # We call ensure_min_schema directly, which is correct.
-    # The traceback in your prompt shows an older version of your code.
-    # The current version of your `main.py` should only call `ensure_min_schema()`.
-    # Let's assume the issue is in a dependency.
     try:
         ensure_min_schema()
         print("Startup complete.")
@@ -148,7 +143,8 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
             elif ev.event_type.value in ('generation', 'grid_feed', 'vpp_sale'):
                 balances[p.id]['credit'] += qty * price_meta
 
-        final_balances, stats, transfers = apply_bilateral_netting(balances)
+        # FIX: Pass the policy_body to the netting function
+        final_balances, stats, transfers = apply_bilateral_netting(balances, payload.policy_body)
         
         response_data = {
             "stats": stats,
