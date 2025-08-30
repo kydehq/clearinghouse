@@ -71,6 +71,60 @@
                 <input type="number" id="audit-batch-id" placeholder="Batch-ID eingeben" class="w-full">
                 <button onclick="auditSettlement()" class="btn btn-primary">Audit starten</button>
             </div>
+        <!-- 6. Isometrisches Haus (leichtgewichtiges SVG) -->
+<div class="card space-y-4">
+    <h2 class="text-xl font-semibold">6. Grid ⟷ Haus ⟷ Batterie (Live)</h2>
+    <p class="text-gray-600">Visualisiert Energieflüsse basierend auf der Live-Demo (A ↔ B) und simuliertem Solar/Grid.</p>
+    <div class="flex flex-col md:flex-row gap-6 items-center">
+      <svg id="iso-house" viewBox="0 0 300 180" class="w-full md:w-1/2">
+        <!-- Dach & Hauskörper -->
+        <polygon points="60,40 150,10 240,40 150,70" fill="#e5e7eb" stroke="#c7cdd4"/>
+        <rect x="80" y="70" width="140" height="80" rx="8" fill="#ffffff" stroke="#c7cdd4"/>
+        <!-- PV-Panel -->
+        <rect x="95" y="32" width="110" height="18" rx="3" fill="#0ea5e9" opacity="0.8"/>
+        <!-- Batterie (Keller) -->
+        <rect x="90" y="120" width="50" height="25" rx="4" fill="#111827"/>
+        <rect id="bat-fill" x="93" y="123" width="44" height="19" rx="3" fill="#10b981" />
+        <text x="115" y="115" text-anchor="middle" font-size="10" fill="#374151">Battery A</text>
+        <!-- Batterie B (zweites Haus abstrahiert) -->
+        <rect x="160" y="120" width="50" height="25" rx="4" fill="#111827"/>
+        <rect id="batB-fill" x="163" y="123" width="44" height="19" rx="3" fill="#10b981" />
+        <text x="185" y="115" text-anchor="middle" font-size="10" fill="#374151">Battery B</text>
+        <!-- Netz-Mast -->
+        <rect x="260" y="60" width="6" height="60" fill="#9ca3af"/>
+        <line x1="263" y1="60" x2="263" y2="40" stroke="#9ca3af" />
+        <circle cx="263" cy="35" r="3" fill="#9ca3af"/>
+        <text x="255" y="30" font-size="10" fill="#374151">Grid</text>
+  
+        <!-- Pfeile (animiert über Stroke-Dashoffset) -->
+        <!-- PV -> Haus -->
+        <path id="flow-pv" d="M150,35 L150,70" stroke="#0ea5e9" stroke-width="4" fill="none" stroke-dasharray="6 6"/>
+        <!-- Haus -> Battery A -->
+        <path id="flow-ha" d="M120,95 L115,120" stroke="#10b981" stroke-width="4" fill="none" stroke-dasharray="6 6"/>
+        <!-- Battery A -> Battery B -->
+        <path id="flow-ab" d="M140,132 L160,132" stroke="#10b981" stroke-width="4" fill="none" stroke-dasharray="6 6"/>
+        <!-- Haus -> Grid -->
+        <path id="flow-hg" d="M220,95 L260,75" stroke="#f59e0b" stroke-width="4" fill="none" stroke-dasharray="6 6"/>
+  
+        <!-- Labels -->
+        <text id="lbl-price" x="20" y="170" font-size="10" fill="#374151">Price: €0.30/kWh</text>
+        <text id="lbl-trade" x="150" y="170" text-anchor="middle" font-size="10" fill="#374151">Last trade: –</text>
+      </svg>
+  
+      <div class="w-full md:w-1/2 space-y-3">
+        <div>
+          <div class="flex justify-between text-sm mb-1"><span>Battery A</span><span id="iso-soc-a">70%</span></div>
+          <div class="soc-bar"><div id="iso-bar-a" class="soc-fill" style="width:70%"></div></div>
+        </div>
+        <div>
+          <div class="flex justify-between text-sm mb-1"><span>Battery B</span><span id="iso-soc-b">30%</span></div>
+          <div class="soc-bar"><div id="iso-bar-b" class="soc-fill" style="width:30%"></div></div>
+        </div>
+        <button onclick="toggleIso()" class="btn btn-secondary">Pause/Resume Animation</button>
+      </div>
+    </div>
+  </div>
+  
             <div class="flex items-center mt-2 space-x-2">
                 <input id="explain-checkbox" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
                 <label for="explain-checkbox" class="text-sm text-gray-700">Erklärung anzeigen</label>
