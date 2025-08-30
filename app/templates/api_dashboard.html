@@ -171,12 +171,14 @@
             try {
                 const policyInput = document.getElementById('policy-input').value;
                 const policyBody = JSON.parse(policyInput);
+                const currentTime = new Date();
+                const startTime = new Date(currentTime.getTime() - 86400000 * 2);
 
                 const settlePayload = {
                     "use_case": policyBody.use_case,
                     "policy_body": policyBody,
-                    "start_time": new Date(Date.now() - 86400000 * 2).toISOString(),
-                    "end_time": new Date().toISOString()
+                    "start_time": startTime.toISOString(),
+                    "end_time": currentTime.toISOString()
                 };
                 const response = await fetch(`${BASE_URL}/v1/settle/execute`, {
                     method: 'POST',

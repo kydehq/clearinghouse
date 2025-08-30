@@ -1,23 +1,20 @@
 from __future__ import annotations
 import io, json, traceback
 from pathlib import Path
-import pandas as pd
 from collections import defaultdict
 from typing import List, Optional
-
-from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from . import use_cases
-from .db import create_db_and_tables, get_db, ensure_min_schema, _add_varchar_column_if_missing, _add_json_column_if_missing, _add_timestamptz_column_if_missing, _drop_column_if_exists, _add_float_column_if_missing, _add_integer_column_if_missing
-from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, SettlementLine, LedgerEntry
+from .db import ensure_min_schema, get_db
+from .models import Participant, ParticipantRole, UsageEvent, EventType, SettlementBatch, SettlementLine
 from .settle import apply_policy_and_settle, apply_bilateral_netting, create_transaction_hash
-from .audit import get_audit_data
 
 # ---------- App / Templates ----------
 BASE_DIR = Path(__file__).resolve().parent
@@ -89,9 +86,9 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
                 db.add(p)
                 new_participants_list.append(p)
                 participant_map_dict[ext_id] = p
-
+        
         if new_participants_list: db.flush()
-
+        
         usage_events: list[UsageEvent] = []
         for event in events:
             ext_id = event.participant_id
@@ -157,7 +154,6 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/v1/settle/execute", response_class=JSONResponse)
 def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
     try:
@@ -165,7 +161,10 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found to settle."})
         
-        batch, result_data, netting_stats = apply_policy_and_settle(db, payload.use_case, payload.policy_body, events)
+        batch, result_data, netting_stats = apply_policy_and_settle(
+            db, payload.use_case, payload.policy_body, events, 
+            start_time=payload.start_time, end_time=payload.end_time
+        )
         
         return JSONResponse(content={
             "status": "success",
@@ -230,7 +229,6 @@ def _generate_human_readable_explanation(participant, events, final_amount, use_
     
     return summary
 
-# ---------- API-Route für Audit & Erklärung (Finalität) ----------
 @app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
 def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = False):
     try:
