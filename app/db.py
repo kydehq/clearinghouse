@@ -127,6 +127,8 @@ def ensure_min_schema():
         conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_batches (id SERIAL PRIMARY KEY);"""))
         _add_varchar_column_if_missing(conn, "settlement_batches", "use_case", "mieterstrom")
         _add_timestamptz_column_if_missing(conn, "settlement_batches", "created_at")
+        _add_timestamptz_column_if_missing('settlement_batch', 'start_time')
+        _add_timestamptz_column_if_missing('settlement_batch', 'end_time')
 
         # settlement_lines
         conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_lines (id SERIAL PRIMARY KEY);"""))
