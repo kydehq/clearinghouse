@@ -43,20 +43,21 @@ def apply_bilateral_netting(
 
     i, j = 0, 0
     while i < len(positive_balances) and j < len(negative_balances):
-        creditor_id, credit_amount = positive_balances[i][1]
-        debtor_id, debt_amount = negative_balances[j][1]
-
+        # FIX: Access the entire tuple, not just the float value
+        creditor_id, credit_amount = positive_balances[i]
+        debtor_id, debt_amount = negative_balances[j]
+        
         transfer_amount = min(credit_amount, debt_amount)
 
         # Die Balances werden IMMER ausgeglichen
-        positive_balances[i] = (positive_balances[i][0], credit_amount - transfer_amount)
-        negative_balances[j] = (negative_balances[j][0], debt_amount - transfer_amount)
+        positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
+        negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
 
         # Transaktion wird NUR DANN erstellt, wenn sie den Schwellenwert übersteigt
         if transfer_amount > min_threshold:
             transfers.append({
-                'from_id': negative_balances[j][0],
-                'to_id': positive_balances[i][0],
+                'from_id': debtor_id,
+                'to_id': creditor_id,
                 'amount_eur': round(transfer_amount, 2)
             })
 
