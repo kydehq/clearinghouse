@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API-Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; background-color: #f6f7f9; color: #0f172a; }
+        .card { background-color: #fff; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,.06); padding: 1.5rem; }
+        pre { background-color: #f3f4f6; padding: 1rem; border-radius: 0.5rem; white-space: pre-wrap; word-wrap: break-word; font-size: 0.875rem; }
+        .btn { padding: 0.75rem 1.25rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: background-color 0.2s; }
+        .btn-primary { background-color: #1a202c; color: #fff; }
+        .btn-primary:hover { background-color: #2d3748; }
+        .btn-secondary { background-color: #edf2f7; color: #4a5568; }
+        .btn-secondary:hover { background-color: #e2e8f0; }
+        .flex-container { display: flex; gap: 1rem; }
+        .flex-item { flex: 1; }
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-7xl mx-auto space-y-8">
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-3xl font-bold">API-Dashboard (Tag 1 Demo)</h1>
+                <a href="/" class="btn btn-secondary">← Zurück</a>
+            </div>
+            <p class="text-gray-600">
+                Führe die API-Calls aus, um die Kernfunktionalität zu demonstrieren. Die JSON-Antworten werden unten angezeigt.
+            </p>
+        </div>
+
+        <div class="card space-y-6">
+            <h2 class="text-xl font-semibold">1. Events Ingestieren</h2>
+            <p class="text-gray-600">Sende simulierte Energie-Events an den <code>/v1/energy-events</code> Endpunkt.</p>
+            <button onclick="sendEvents()" class="btn btn-primary">Events senden</button>
+            <pre id="response-events" class="mt-4"></pre>
+        </div>
+
+        <div class="card space-y-6">
+            <h2 class="text-xl font-semibold">2. Netting Preview Abfragen</h2>
+            <p class="text-gray-600">Frage den optimierten Zahlungsplan über <code>/v1/netting/preview</code> ab.</p>
+            <button onclick="getNettingPreview()" class="btn btn-primary">Netting Preview abfragen</button>
+            <pre id="response-netting" class="mt-4"></pre>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = window.location.origin;
+
+        const eventsPayload = [
+            {
+                "participant_id": "machine-1",
+                "event_type": "consumption",
+                "quantity": 5.2,
+                "unit": "kWh",
+                "timestamp": new Date().toISOString(),
+                "source": "local_pv",
+                "price_eur_per_kwh": 0.25
+            },
+            {
+                "participant_id": "machine-2",
+                "event_type": "generation",
+                "quantity": 3.8,
+                "unit": "kWh",
+                "timestamp": new Date().toISOString(),
+                "source": "solar_panel",
+                "price_eur_per_kwh": 0.25
+            },
+            {
+                "participant_id": "machine-1",
+                "event_type": "consumption",
+                "quantity": 10.0,
+                "unit": "kWh",
+                "timestamp": new Date().toISOString(),
+                "source": "grid_external",
+                "price_eur_per_kwh": 0.35
+            },
+            {
+                "participant_id": "machine-2",
+                "event_type": "consumption",
+                "quantity": 2.0,
+                "unit": "kWh",
+                "timestamp": new Date().toISOString(),
+                "source": "grid_external",
+                "price_eur_per_kwh": 0.35
+            },
+        ];
+
+        const nettingPayload = {
+            "use_case": "mieterstrom",
+            "policy_body": {
+                "local_pv_price_eur_kwh": 0.25,
+                "feed_in_price_eur_kwh": 0.08,
+                "vpp_sale_price_eur_kwh": 0.10
+            },
+            "start_time": new Date(Date.now() - 86400000 * 2).toISOString(), // vor 2 Tagen
+            "end_time": new Date().toISOString(),
+            "community_id": "community-a"
+        };
+        
+        async function sendEvents() {
+            const responseElement = document.getElementById('response-events');
+            responseElement.textContent = 'Sende Events...';
+            try {
+                const response = await fetch(`${BASE_URL}/v1/energy-events`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(eventsPayload)
+                });
+                const data = await response.json();
+                responseElement.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                responseElement.textContent = 'Fehler: ' + error.message;
+            }
+        }
+
+        async function getNettingPreview() {
+            const responseElement = document.getElementById('response-netting');
+            responseElement.textContent = 'Frage Netting Preview ab...';
+            try {
+                const response = await fetch(`${BASE_URL}/v1/netting/preview`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(nettingPayload)
+                });
+                const data = await response.json();
+                responseElement.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                responseElement.textContent = 'Fehler: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
