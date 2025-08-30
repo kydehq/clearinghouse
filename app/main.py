@@ -188,17 +188,17 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
             raise HTTPException(status_code=404, detail="Batch not found.")
         
         lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
-
+        
         # Korrektur: Finde die Events, die zu diesem Batch gehören
-        start_time = batch.created_at - timedelta(days=2) # Proxy für den Start des Zeitfensters
+        # Wir nutzen einen simplen Proxy: Alle Events, die vor dem Batch erstellt wurden
         end_time = batch.created_at
+        start_time = end_time - timedelta(hours=1)
         
         all_events_in_batch_timeframe = db.query(UsageEvent).filter(
             UsageEvent.timestamp >= start_time,
             UsageEvent.timestamp <= end_time
         ).all()
         
-        # Hole alle Teilnehmer, um die IDs zu mappen
         all_participants = {p.id: p for p in db.query(Participant).all()}
         
         audit_data = {
@@ -226,13 +226,15 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
                 "is_verified": (recreated_hash == line.proof_hash)
             }
             
-            # Füge die Erklärung hinzu, wenn das "explain"-Flag gesetzt ist
             if explain:
                 explanation = []
                 for event in all_events_in_batch_timeframe:
                     if event.participant_id == line.participant_id:
                         participant = all_participants.get(event.participant_id)
-                        explanation.append(f"Event: {event.event_type.value} von {participant.name} ({participant.role.value}), Menge: {event.quantity} {event.unit}, Preis: {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh")
+                        # Korrektur: Access the correct value from the Enum
+                        explanation.append(
+                            f"Event: {event.event_type.value.capitalize()} von {participant.name}, Menge: {event.quantity} {event.unit}, Preis: {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh."
+                        )
                 line_data["explanation"] = explanation
             
             audit_data["settlement_lines"].append(line_data)
