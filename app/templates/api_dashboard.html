@@ -194,28 +194,31 @@
             }
         }
 
-        async function auditSettlement() {
-            const responseElement = document.getElementById('response-audit');
-            const batchId = document.getElementById('audit-batch-id').value;
-            const explainCheckbox = document.getElementById('explain-checkbox').checked;
+    async function auditSettlement() {
+        const responseElement = document.getElementById('response-audit');
+        const batchId = document.getElementById('audit-batch-id').value;
+        const explainCheckbox = document.getElementById('explain-checkbox');
 
-            if (!batchId) {
-                responseElement.textContent = 'Bitte eine Batch-ID eingeben.';
-                return;
-            }
-            responseElement.textContent = 'Starte Audit...';
-            try {
-                let url = `${BASE_URL}/v1/audit/${batchId}`;
-                if (explainCheckbox) {
-                    url += "?explain=true";
-                }
-                const response = await fetch(url);
-                const data = await response.json();
-                responseElement.textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                responseElement.textContent = 'Fehler: ' + error.message;
-            }
+        if (!batchId) {
+            responseElement.textContent = 'Bitte eine Batch-ID eingeben.';
+            return;
+    }
+    responseElement.textContent = 'Starte Audit...';
+    try {
+        let url = `${BASE_URL}/v1/audit/${batchId}`;
+        
+        // This is the key change: check if the checkbox is checked
+        if (explainCheckbox.checked) {
+            url += "?explain=true";
         }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        responseElement.textContent = JSON.stringify(data, null, 2);
+    } catch (error) {
+        responseElement.textContent = 'Fehler: ' + error.message;
+    }
+}
     </script>
 </body>
 </html>
