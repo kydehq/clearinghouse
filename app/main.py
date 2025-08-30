@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from datetime import datetime
 
+# Deine lokalen Importe
 from . import use_cases
 from .db import ensure_min_schema, get_db
 from .models import Participant, ParticipantRole, UsageEvent, EventType, SettlementBatch, SettlementLine
@@ -81,8 +82,8 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
             p = participant_map_dict.get(ext_id)
 
             if not p:
-                # Korrektur: Role in Kleinbuchstaben konvertieren
-                role = ParticipantRole.PROSUMER.lower()
+                # KORREKTUR 1: Die Rolle wird direkt als Enum-Mitglied (in Kleinbuchstaben) zugewiesen.
+                role = ParticipantRole.prosumer
                 p = Participant(external_id=ext_id, name=f"Participant {ext_id}", role=role)
                 db.add(p)
                 new_participants_list.append(p)
@@ -99,7 +100,7 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
 
             usage_event = UsageEvent(
                 participant_id=p.id,
-                # Korrektur: event_type in Kleinbuchstaben konvertieren
+                # KORREKTUR 2: Der Event-Typ aus der Anfrage wird in Kleinbuchstaben umgewandelt.
                 event_type=EventType(event.event_type.lower()),
                 quantity=event.quantity,
                 unit=event.unit,
@@ -113,7 +114,7 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
         return {"status": "success", "message": f"Ingested {len(events)} events."}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Fehler beim Verarbeiten der Events: {str(e)}")
 
 @app.post("/v1/netting/preview", response_class=JSONResponse)
 def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db)):
