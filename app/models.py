@@ -1,86 +1,97 @@
-from __future__ import annotations
+# models.py
 import enum
-from sqlalchemy import Integer, String, Float, DateTime, Boolean, JSON, ForeignKey, Enum
-from sqlalchemy.orm import relationship, Mapped, mapped_column
-from sqlalchemy.sql import func
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Enum,
+    Float,
+    JSON,
+    ForeignKey,
+    text,
+)
+from sqlalchemy.orm import relationship
 from .db import Base
 
-# Enums nutzen lowercase-Strings (passend zur CSV)
-class ParticipantRole(enum.Enum):
-    PROSUMER = "prosumer"
-    CONSUMER = "consumer"
-    LANDLORD = "landlord"
-    TENANT = "tenant"
-    OPERATOR = "operator"
-    COMMERCIAL = "commercial"
-    COMMUNITY_FEE_COLLECTOR = "community_fee_collector"
-    EXTERNAL_MARKET = "external_market"
 
-class EventType(enum.Enum):
-    GENERATION = "generation"
-    CONSUMPTION = "consumption"
-    BASE_FEE = "base_fee"
-    GRID_FEED = "grid_feed"
-    BATTERY_CHARGE = "battery_charge"
-    PRODUCTION = "production"
-    VPP_SALE = "vpp_sale"
-    BATTERY_DISCHARGE = "battery_discharge"
+class ParticipantRole(str, enum.Enum):
+    prosumer = "prosumer"
+    consumer = "consumer"
+    landlord = "landlord"
+    tenant = "tenant"
+    operator = "operator"
+    commercial = "commercial"
+    community_fee_collector = "community_fee_collector"
+    external_market = "external_market"
+
+
+class EventType(str, enum.Enum):
+    generation = "generation"
+    consumption = "consumption"
+    grid_feed = "grid_feed"
+    base_fee = "base_fee"
+    battery_charge = "battery_charge"
+    production = "production"
+    vpp_sale = "vpp_sale"
+    battery_discharge = "battery_discharge"
+
 
 class Participant(Base):
     __tablename__ = "participants"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    external_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    role: Mapped[ParticipantRole] = mapped_column(Enum(ParticipantRole, name="participantrole"), nullable=False)
+    id = Column(Integer, primary_key=True)
+    external_id = Column(String, unique=True, index=True)
+    name = Column(String)
+    role = Column(Enum(ParticipantRole), default=ParticipantRole.consumer)
 
-    events = relationship("UsageEvent", back_populates="participant", cascade="all, delete-orphan")
-    settlement_lines = relationship("SettlementLine", back_populates="participant", cascade="all, delete-orphan")
-    ledger_entries = relationship("LedgerEntry", back_populates="participant", cascade="all, delete-orphan")
 
 class UsageEvent(Base):
     __tablename__ = "usage_events"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"))
-    event_type: Mapped[EventType] = mapped_column(Enum(EventType, name="eventtype"), nullable=False)
-    quantity: Mapped[float] = mapped_column(Float, nullable=False)  # kWh oder EUR bei BASE_FEE
-    unit: Mapped[str] = mapped_column(String, nullable=False, default="kWh")
-    meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    timestamp: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    participant = relationship("Participant", back_populates="events")
+    id = Column(Integer, primary_key=True)
+    participant_id = Column(Integer, ForeignKey("participants.id"))
+    event_type = Column(Enum(EventType))
+    quantity = Column(Float)
+    unit = Column(String)
+    timestamp = Column(DateTime(timezone=True))
+    meta = Column(JSON, default=text("'{}'::json"))
+    participant = relationship("Participant")
+
 
 class Policy(Base):
     __tablename__ = "policies"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    use_case: Mapped[str] = mapped_column(String, index=True)  # 'mieterstrom'
-    body: Mapped[dict] = mapped_column(JSON)
-    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True)
+    use_case = Column(String)
+    body = Column(JSON, default=text("'{}'::json"))
+    created_at = Column(DateTime(timezone=True), default=text("NOW()"))
+
 
 class SettlementBatch(Base):
     __tablename__ = "settlement_batches"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    use_case: Mapped[str] = mapped_column(String, index=True)
-    created_at: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    lines = relationship("SettlementLine", back_populates="batch", cascade="all, delete-orphan")
+    id = Column(Integer, primary_key=True)
+    use_case = Column(String, default="mieterstrom")
+    created_at = Column(DateTime(timezone=True), default=text("NOW()"))
+    # NEU: Start- und Endzeitpunkte zur Klasse hinzufügen
+    start_time = Column(DateTime(timezone=True))
+    end_time = Column(DateTime(timezone=True))
+
 
 class SettlementLine(Base):
     __tablename__ = "settlement_lines"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("settlement_batches.id"))
-    participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"))
-    amount_eur: Mapped[float] = mapped_column(Float, nullable=False)  # + wir zahlen an Teilnehmer; - Teilnehmer schuldet
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
-    proof_hash: Mapped[str | None] = mapped_column(String(64), nullable=True) # New Field!
-    batch = relationship("SettlementBatch", back_populates="lines")
-    participant = relationship("Participant", back_populates="settlement_lines")
+    id = Column(Integer, primary_key=True)
+    participant_id = Column(Integer)
+    batch_id = Column(Integer)
+    amount_eur = Column(Float)
+    description = Column(String)
+    proof_hash = Column(String)
+
 
 class LedgerEntry(Base):
     __tablename__ = "ledger_entries"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    settlement_line_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("settlement_lines.id"), nullable=True)
-    participant_id: Mapped[int] = mapped_column(Integer, ForeignKey("participants.id"))
-    account_type: Mapped[str] = mapped_column(String, nullable=False)  # 'Asset','Liability','Revenue','Expense'
-    amount: Mapped[float] = mapped_column(Float, nullable=False)
-    is_debit: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    timestamp: Mapped[str] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
-    participant = relationship("Participant", back_populates="ledger_entries")
+    id = Column(Integer, primary_key=True)
+    sender_id = Column(Integer, ForeignKey("participants.id"))
+    receiver_id = Column(Integer, ForeignKey("participants.id"))
+    amount_eur = Column(Float)
+    batch_id = Column(Integer, ForeignKey("settlement_batches.id"))
+    transaction_hash = Column(String)
+    sender = relationship("Participant", foreign_keys=[sender_id])
+    receiver = relationship("Participant", foreign_keys=[receiver_id])

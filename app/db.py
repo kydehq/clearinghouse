@@ -1,17 +1,16 @@
+# db.py
 from __future__ import annotations
 import os
 import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Lade die Umgebungsvariable
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL Umgebungsvariable ist nicht gesetzt.")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Erstelle die SQLAlchemy Engine und Session
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 Base = declarative_base()
@@ -56,14 +55,9 @@ def _ensure_enum_values(conn, enum_name: str, values: list[str]):
             conn.execute(text(f"ALTER TYPE {enum_name} ADD VALUE '{v}'"))
 
 def _column_exists(conn, table: str, column: str) -> bool:
-    row = conn.execute(
-        text("""
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = :t AND column_name = :c LIMIT 1
-        """),
-        {"t": table, "c": column},
-    ).first()
-    return row is not None
+    inspector = sa.inspect(conn)
+    columns = inspector.get_columns(table)
+    return column in [col['name'] for col in columns]
 
 def _add_json_column_if_missing(conn, table: str, column: str):
     if not _column_exists(conn, table, column):
@@ -142,6 +136,7 @@ def ensure_min_schema():
         _add_varchar_column_if_missing(conn, "settlement_lines", "proof_hash", "")
 
         # usage_events
+        conn.execute(text("""CREATE TABLE IF NOT EXISTS usage_events (id SERIAL PRIMARY KEY);"""))
         _add_float_column_if_missing(conn,   "usage_events", "quantity", 0.0)
         _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")
         if not _column_exists(conn, "usage_events", "meta"):
