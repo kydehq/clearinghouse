@@ -4,7 +4,6 @@ from pathlib import Path
 import pandas as pd
 from collections import defaultdict
 from typing import List, Optional
-import hashlib
 
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -15,7 +14,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from . import use_cases
-from .db import create_db_and_tables, get_db, ensure_min_schema, _add_varchar_column_if_missing, _add_json_column_if_missing, _add_timestamptz_column_if_missing, _drop_column_if_exists, _add_float_column_if_missing, _add_integer_column_if_missing
+from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, SettlementLine, LedgerEntry
 from .settle import apply_policy_and_settle, apply_bilateral_netting, create_transaction_hash
 from .audit import get_audit_data
@@ -66,7 +65,6 @@ def on_startup():
         raise
 
 # ---------- API Routes ----------
-# Startseite, die direkt zum Dashboard führt
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -143,7 +141,6 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
             elif ev.event_type.value in ('generation', 'grid_feed', 'vpp_sale'):
                 balances[p.id]['credit'] += qty * price_meta
 
-        # FIX: Pass the policy_body to the netting function
         final_balances, stats, transfers = apply_bilateral_netting(balances, payload.policy_body)
         
         response_data = {
@@ -184,7 +181,7 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
-def audit_batch(batch_id: int, db: Session = Depends(get_db)):
+def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = False):
     try:
         batch = db.query(SettlementBatch).filter(SettlementBatch.id == batch_id).first()
         if not batch:
@@ -199,7 +196,11 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db)):
             "settlement_lines": []
         }
         
+        # Holen aller Events, die zu diesem Batch geführt haben
+        events = db.query(UsageEvent).join(Participant).all()
+        
         for line in lines:
+            # Rekreieren des Hashs zur Überprüfung der Integrität
             transaction_data = {
                 "batch_id": line.batch_id,
                 "participant_id": line.participant_id,
@@ -208,14 +209,24 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db)):
             }
             recreated_hash = create_transaction_hash(transaction_data)
             
-            audit_data["settlement_lines"].append({
+            line_data = {
                 "line_id": line.id,
                 "participant_id": line.participant_id,
                 "amount_eur": line.amount_eur,
                 "description": line.description,
                 "proof_hash": line.proof_hash,
-                "is_verified": (recreated_hash == line.proof_hash)
-            })
+                "is_verified": (recreated_hash == line.proof_hash) # The core check!
+            }
+            
+            # Füge die Erklärung hinzu, wenn das "explain"-Flag gesetzt ist
+            if explain:
+                explanation = []
+                for event in events:
+                    if event.participant_id == line.participant_id:
+                        explanation.append(f"Event: {event.event_type.value} von {event.quantity} {event.unit} zu einem Preis von {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh.")
+                line_data["explanation"] = explanation
+            
+            audit_data["settlement_lines"].append(line_data)
             
         return JSONResponse(content=audit_data)
 

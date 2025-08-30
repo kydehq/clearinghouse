@@ -25,7 +25,7 @@
     <div class="max-w-7xl mx-auto space-y-8">
         <div class="card">
             <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold">API-Dashboard (Tag 3 Demo)</h1>
+                <h1 class="text-3xl font-bold">API-Dashboard (Tag 4 Demo)</h1>
                 <a href="/" class="btn btn-secondary">← Zurück</a>
             </div>
             <p class="text-gray-600">
@@ -70,6 +70,10 @@
             <div class="input-group">
                 <input type="number" id="audit-batch-id" placeholder="Batch-ID eingeben" class="w-full">
                 <button onclick="auditSettlement()" class="btn btn-primary">Audit starten</button>
+            </div>
+            <div class="flex items-center mt-2 space-x-2">
+                <input id="explain-checkbox" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                <label for="explain-checkbox" class="text-sm text-gray-700">Erklärung anzeigen</label>
             </div>
             <pre id="response-audit" class="mt-4"></pre>
         </div>
@@ -117,7 +121,6 @@
             },
         ];
         
-        // Globale Variable, um die Batch-ID zu speichern
         let latestBatchId = null;
 
         async function sendEvents() {
@@ -182,7 +185,6 @@
                 });
                 const data = await response.json();
                 
-                // Speichere die Batch-ID für den Audit
                 latestBatchId = data.batch_id;
                 document.getElementById('audit-batch-id').value = latestBatchId;
 
@@ -195,20 +197,25 @@
         async function auditSettlement() {
             const responseElement = document.getElementById('response-audit');
             const batchId = document.getElementById('audit-batch-id').value;
+            const explainCheckbox = document.getElementById('explain-checkbox').checked;
+
             if (!batchId) {
                 responseElement.textContent = 'Bitte eine Batch-ID eingeben.';
                 return;
             }
             responseElement.textContent = 'Starte Audit...';
             try {
-                const response = await fetch(`${BASE_URL}/v1/audit/${batchId}`);
+                let url = `${BASE_URL}/v1/audit/${batchId}`;
+                if (explainCheckbox) {
+                    url += "?explain=true";
+                }
+                const response = await fetch(url);
                 const data = await response.json();
                 responseElement.textContent = JSON.stringify(data, null, 2);
             } catch (error) {
                 responseElement.textContent = 'Fehler: ' + error.message;
             }
         }
-
     </script>
 </body>
 </html>
