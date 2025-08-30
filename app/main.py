@@ -79,28 +79,50 @@ def to_float_safe(x) -> float:
     except (ValueError, TypeError): return 0.0
 
 # ---------- API Routes ----------
+@app.get("/demo/api-dashboard", response_class=HTMLResponse)
+def get_api_dashboard(request: Request):
+    return templates.TemplateResponse("api_dashboard.html", {"request": request})
+
 @app.post("/v1/energy-events", status_code=201)
 def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_db)):
     try:
-        new_participants = set()
+        new_participants_list = []
+        participant_map_dict = {p.external_id: p for p in db.query(Participant).all()}
+
         for event in events:
-            # Einfache Validierung und Speicherung (kein komplexes Mapping hier)
-            p = db.query(Participant).filter(Participant.external_id == event.participant_id).first()
+            ext_id = event.participant_id
+            p = participant_map_dict.get(ext_id)
+
             if not p:
-                new_participants.add(event.participant_id)
-            
+                # Annahme: Rolle ist prosumer oder consumer für die Demo
+                role = ParticipantRole.PROSUMER
+                p = Participant(external_id=ext_id, name=f"Participant {ext_id}", role=role)
+                db.add(p)
+                new_participants_list.append(p)
+                participant_map_dict[ext_id] = p
+        
+        if new_participants_list: db.flush() # ID's generieren
+        
+        usage_events: list[UsageEvent] = []
+        for event in events:
+            ext_id = event.participant_id
+            p = participant_map_dict.get(ext_id)
+            if not p:
+                raise HTTPException(status_code=500, detail=f"Teilnehmer mit ID {ext_id} konnte nicht erstellt oder gefunden werden.")
+
             usage_event = UsageEvent(
-                participant_id=p.id if p else None, # Wir lösen das Mapping im `process_data`
+                participant_id=p.id,
                 event_type=EventType(event.event_type.lower()),
                 quantity=event.quantity,
                 unit=event.unit,
                 timestamp=event.timestamp,
                 meta={"source": event.source, "price_eur_per_kwh": event.price_eur_per_kwh}
             )
-            db.add(usage_event)
-        
+            usage_events.append(usage_event)
+
+        db.add_all(usage_events)
         db.commit()
-        return {"status": "success", "message": f"Ingested {len(events)} events. {len(new_participants)} new participants detected."}
+        return {"status": "success", "message": f"Ingested {len(events)} events."}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -112,30 +134,31 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
 
-        # Zuerst alle Teilnehmer finden
         participant_ids = [e.participant_id for e in events]
         participants = db.query(Participant).filter(Participant.id.in_(participant_ids)).all()
         id_to_participant = {p.id: p for p in participants}
 
-        # Dann die Brutto-Saldi aus den Events berechnen
         balances = defaultdict(lambda: {'credit': 0.0, 'debit': 0.0})
         for ev in events:
             p = id_to_participant.get(ev.participant_id)
             if not p: continue
-            qty = ev.quantity
-            role = p.role.value
-            event_type = ev.event_type.value
             
-            # Simple Brutto-Logik für Demo-Zwecke
-            if role in ('tenant', 'commercial') and event_type in ('consumption', 'base_fee'):
-                balances[p.id]['debit'] += qty # Für Konsumenten
-            elif role in ('prosumer', 'landlord') and event_type in ('generation', 'grid_feed'):
-                balances[p.id]['credit'] += qty # Für Produzenten
+            # Die Logik aus apply_policy_and_settle hier replizieren
+            qty = float(ev.quantity or 0.0)
+            meta = ev.meta or {}
+            src = (meta.get('source') or '').lower()
+            price_meta = float(meta.get('price_eur_per_kwh') or 0.0)
+            
+            # Simple Brutto-Logik, die die `mieterstrom` Policy in der API-Preview abbildet
+            if ev.event_type.value in ('consumption', 'base_fee'):
+                # Fiktive Logik: Konsumenten schulden Geld
+                balances[p.id]['debit'] += qty * price_meta
+            elif ev.event_type.value in ('generation', 'grid_feed', 'vpp_sale'):
+                # Fiktive Logik: Produzenten erhalten Geld
+                balances[p.id]['credit'] += qty * price_meta
 
-        # Netting-Algorithmus ausführen
         final_balances, stats, transfers = apply_bilateral_netting(balances)
         
-        # Ausgabe für die API formatieren
         response_data = {
             "stats": stats,
             "transfers": transfers,
@@ -270,8 +293,6 @@ async def process_data(
         net_flow_after  = sum(abs(r['net_eur']) for r in rows)
 
         transfers_ui = []
-        # Update: `apply_bilateral_netting` returns a dict with `from_id`, `to_id`, `amount_eur`
-        # Now map them to names for the UI
         _, _, transfers_list_raw = apply_bilateral_netting(result_data)
         for t in transfers_list_raw:
             deb_id = t['from_id']
