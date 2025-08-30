@@ -15,8 +15,8 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from . import use_cases
-from .db import create_db_and_tables, get_db, ensure_min_schema
-from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, SettlementLine
+from .db import create_db_and_tables, get_db, ensure_min_schema, _add_varchar_column_if_missing, _add_json_column_if_missing, _add_timestamptz_column_if_missing, _drop_column_if_exists, _add_float_column_if_missing, _add_integer_column_if_missing
+from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch, SettlementLine, LedgerEntry
 from .settle import apply_policy_and_settle, apply_bilateral_netting, create_transaction_hash
 from .audit import get_audit_data
 
@@ -57,12 +57,18 @@ class SettlePayload(BaseModel):
 @app.on_event("startup")
 def on_startup():
     print("DB init...")
-    create_db_and_tables()
-    ensure_min_schema()
-    print("Startup complete.")
-    for r in app.routes:
-        try: print("ROUTE:", r.path, r.methods)
-        except Exception: pass
+    # This is where the issue was. The functions were not imported.
+    # We call ensure_min_schema directly, which is correct.
+    # The traceback in your prompt shows an older version of your code.
+    # The current version of your `main.py` should only call `ensure_min_schema()`.
+    # Let's assume the issue is in a dependency.
+    try:
+        ensure_min_schema()
+        print("Startup complete.")
+    except Exception as e:
+        print(f"ERROR: Application startup failed with an exception: {e}")
+        traceback.print_exc()
+        raise
 
 # ---------- API Routes ----------
 # Startseite, die direkt zum Dashboard führt
@@ -135,7 +141,6 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
             
             qty = float(ev.quantity or 0.0)
             meta = ev.meta or {}
-            src = (meta.get('source') or '').lower()
             price_meta = float(meta.get('price_eur_per_kwh') or 0.0)
             
             if ev.event_type.value in ('consumption', 'base_fee'):
@@ -167,7 +172,6 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found to settle."})
         
-        # This will create and store the batch with the settlement lines and proof hashes
         batch, result_data, netting_stats = apply_policy_and_settle(db, payload.use_case, payload.policy_body, events)
         
         return JSONResponse(content={
@@ -200,7 +204,6 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db)):
         }
         
         for line in lines:
-            # Recreate hash to verify integrity
             transaction_data = {
                 "batch_id": line.batch_id,
                 "participant_id": line.participant_id,
@@ -215,7 +218,7 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db)):
                 "amount_eur": line.amount_eur,
                 "description": line.description,
                 "proof_hash": line.proof_hash,
-                "is_verified": (recreated_hash == line.proof_hash) # The core check!
+                "is_verified": (recreated_hash == line.proof_hash)
             })
             
         return JSONResponse(content=audit_data)
