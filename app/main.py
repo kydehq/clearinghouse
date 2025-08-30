@@ -3,18 +3,20 @@ import io, json, traceback
 from pathlib import Path
 import pandas as pd
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, Request, Depends, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from datetime import datetime
 
 from . import use_cases
 from .db import create_db_and_tables, get_db, ensure_min_schema
 from .models import Participant, ParticipantRole, UsageEvent, EventType, Policy, SettlementBatch
-from .settle import apply_policy_and_settle
+from .settle import apply_policy_and_settle, apply_bilateral_netting
 from .audit import get_audit_data
 
 # ---------- App / Templates ----------
@@ -25,6 +27,23 @@ STATIC_DIR = BASE_DIR.parent / "static"
 app = FastAPI(title="KYDE PoC", debug=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Pydantic-Modell für API-Payloads
+class EventPayload(BaseModel):
+    participant_id: str
+    event_type: str
+    quantity: float
+    unit: str
+    timestamp: datetime
+    source: str
+    price_eur_per_kwh: Optional[float] = 0.0
+
+class NettingPreviewPayload(BaseModel):
+    use_case: str
+    policy_body: dict
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    community_id: Optional[str] = None
 
 # ---------- Startup ----------
 @app.on_event("startup")
@@ -59,7 +78,79 @@ def to_float_safe(x) -> float:
     try: return float(s)
     except (ValueError, TypeError): return 0.0
 
-# ---------- Routes ----------
+# ---------- API Routes ----------
+@app.post("/v1/energy-events", status_code=201)
+def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_db)):
+    try:
+        new_participants = set()
+        for event in events:
+            # Einfache Validierung und Speicherung (kein komplexes Mapping hier)
+            p = db.query(Participant).filter(Participant.external_id == event.participant_id).first()
+            if not p:
+                new_participants.add(event.participant_id)
+            
+            usage_event = UsageEvent(
+                participant_id=p.id if p else None, # Wir lösen das Mapping im `process_data`
+                event_type=EventType(event.event_type.lower()),
+                quantity=event.quantity,
+                unit=event.unit,
+                timestamp=event.timestamp,
+                meta={"source": event.source, "price_eur_per_kwh": event.price_eur_per_kwh}
+            )
+            db.add(usage_event)
+        
+        db.commit()
+        return {"status": "success", "message": f"Ingested {len(events)} events. {len(new_participants)} new participants detected."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/v1/netting/preview", response_class=JSONResponse)
+def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db)):
+    try:
+        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(payload.start_time, payload.end_time)).all()
+        if not events:
+            return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
+
+        # Zuerst alle Teilnehmer finden
+        participant_ids = [e.participant_id for e in events]
+        participants = db.query(Participant).filter(Participant.id.in_(participant_ids)).all()
+        id_to_participant = {p.id: p for p in participants}
+
+        # Dann die Brutto-Saldi aus den Events berechnen
+        balances = defaultdict(lambda: {'credit': 0.0, 'debit': 0.0})
+        for ev in events:
+            p = id_to_participant.get(ev.participant_id)
+            if not p: continue
+            qty = ev.quantity
+            role = p.role.value
+            event_type = ev.event_type.value
+            
+            # Simple Brutto-Logik für Demo-Zwecke
+            if role in ('tenant', 'commercial') and event_type in ('consumption', 'base_fee'):
+                balances[p.id]['debit'] += qty # Für Konsumenten
+            elif role in ('prosumer', 'landlord') and event_type in ('generation', 'grid_feed'):
+                balances[p.id]['credit'] += qty # Für Produzenten
+
+        # Netting-Algorithmus ausführen
+        final_balances, stats, transfers = apply_bilateral_netting(balances)
+        
+        # Ausgabe für die API formatieren
+        response_data = {
+            "stats": stats,
+            "transfers": transfers,
+            "final_balances": {
+                id_to_participant[pid].external_id: round(balance, 2)
+                for pid, balance in final_balances.items() if abs(balance) > 0.01
+            }
+        }
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---------- UI Routes (unverändert) ----------
 @app.get("/", response_class=HTMLResponse)
 def case_selector(request: Request):
     return templates.TemplateResponse("case_selector.html", {"request": request, "title": "Anwendungsfall auswählen"})
@@ -96,7 +187,6 @@ async def process_data(
         if missing:
             raise ValueError(f"Fehlende Spalten in der CSV-Datei: {', '.join(missing)}")
 
-        # Normalize
         df['role'] = df['role'].astype(str).str.strip().str.lower()
         df['event_type'] = df['event_type'].astype(str).str.strip().str.lower()
         df['source'] = df['source'].astype(str).str.strip().str.lower()
@@ -128,7 +218,7 @@ async def process_data(
             participant_map_dict[ext_id] = p
 
         if new_participants_list: db.add_all(new_participants_list)
-        db.flush()  # IDs
+        db.flush()
 
         usage_events: list[UsageEvent] = []
         for _, row in df.iterrows():
@@ -180,10 +270,20 @@ async def process_data(
         net_flow_after  = sum(abs(r['net_eur']) for r in rows)
 
         transfers_ui = []
-        for deb_id, cred_id, amount in netting_stats.get('transfers_list', []):
+        # Update: `apply_bilateral_netting` returns a dict with `from_id`, `to_id`, `amount_eur`
+        # Now map them to names for the UI
+        _, _, transfers_list_raw = apply_bilateral_netting(result_data)
+        for t in transfers_list_raw:
+            deb_id = t['from_id']
+            cred_id = t['to_id']
+            amount = t['amount_eur']
             deb = id_to_participant.get(deb_id)
             cred = id_to_participant.get(cred_id)
-            transfers_ui.append({ "from": deb.name if deb else f"#{deb_id}", "to": cred.name if cred else f"#{cred_id}", "amount_eur": round(float(amount), 2) })
+            transfers_ui.append({
+                "from": deb.name if deb else f"#{deb_id}",
+                "to": cred.name if cred else f"#{cred_id}",
+                "amount_eur": amount
+            })
 
         kpis = {
             'participants': len(rows),

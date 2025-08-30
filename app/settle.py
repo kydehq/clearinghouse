@@ -9,7 +9,7 @@ from .models import (
 
 EPS = 1e-9
 
-def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float]]:
+def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float], List[Dict]]:
     """Bilaterales Netting zur Reduktion von Zahlungen."""
     internal_netted = {}
     total_abs_before_internal = 0.0
@@ -29,7 +29,7 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
     negative_balances.sort(key=lambda x: x[1], reverse=True)
 
     final_balances = {pid: 0.0 for pid in internal_netted.keys()}
-    transfers: List[Tuple[int, int, float]] = []
+    transfers: List[Dict] = []
 
     i, j = 0, 0
     while i < len(positive_balances) and j < len(negative_balances):
@@ -37,7 +37,11 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
         debtor_id, debt_amount = negative_balances[j]
         transfer_amount = min(credit_amount, debt_amount)
         if transfer_amount > EPS:
-            transfers.append((debtor_id, creditor_id, transfer_amount))
+            transfers.append({
+                'from_id': debtor_id,
+                'to_id': creditor_id,
+                'amount_eur': round(transfer_amount, 2)
+            })
         positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
         negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
         if positive_balances[i][1] < EPS: i += 1
@@ -49,15 +53,20 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
         final_balances[debtor_id] = -remaining_debt
 
     total_abs_after_bilateral = sum(abs(balance) for balance in final_balances.values())
+    
+    # KPIs berechnen
+    gross_volume = sum(abs(balance['credit']) + abs(balance['debit']) for balance in participants_balances.values())
+    net_volume = sum(abs(balance) for balance in final_balances.values())
+    netting_efficiency = 1 - (net_volume / gross_volume) if gross_volume > 0 else 0
+
     netting_stats = {
         'total_transfers': len(transfers),
-        'internal_netting_efficiency': 1 - (total_abs_after_internal / total_abs_before_internal) if total_abs_before_internal > 0 else 0,
-        'bilateral_netting_efficiency': 1 - (total_abs_after_bilateral / total_abs_after_internal) if total_abs_after_internal > 0 else 0,
-        'overall_netting_efficiency': 1 - (total_abs_after_bilateral / total_abs_before_internal) if total_abs_before_internal > 0 else 0,
-        'volume_reduction': total_abs_before_internal - total_abs_after_bilateral,
-        'transfers_list': transfers,
+        'netting_efficiency': netting_efficiency,
+        'gross_volume': round(gross_volume, 2),
+        'net_volume': round(net_volume, 2),
     }
-    return final_balances, netting_stats
+
+    return final_balances, netting_stats, transfers
 
 def _ensure_external_market(db: Session) -> Participant:
     external = db.query(Participant).filter(Participant.role == ParticipantRole.EXTERNAL_MARKET).first()
@@ -138,7 +147,7 @@ def apply_policy_and_settle(
                     result[external.id]['credit'] += cost
             # PRODUCTION/GENERATION -> kein Geldfluss
 
-    final_balances, netting_stats = apply_bilateral_netting(result)
+    final_balances, netting_stats, transfers = apply_bilateral_netting(result)
 
     participant_result: Dict[int, Dict[str, float]] = {}
     all_ids = set(result.keys()) | set(final_balances.keys())
