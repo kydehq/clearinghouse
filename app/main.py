@@ -189,16 +189,8 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
         
         lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
         
-        # Korrektur: Finde die Events, die zu diesem Batch gehören
-        # Wir nutzen einen simplen Proxy: Alle Events, die vor dem Batch erstellt wurden
-        end_time = batch.created_at
-        start_time = end_time - timedelta(hours=1)
-        
-        all_events_in_batch_timeframe = db.query(UsageEvent).filter(
-            UsageEvent.timestamp >= start_time,
-            UsageEvent.timestamp <= end_time
-        ).all()
-        
+        # Korrektur: Hole alle Events und filtere sie
+        all_events = db.query(UsageEvent).all()
         all_participants = {p.id: p for p in db.query(Participant).all()}
         
         audit_data = {
@@ -228,12 +220,12 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
             
             if explain:
                 explanation = []
-                for event in all_events_in_batch_timeframe:
+                for event in all_events:
                     if event.participant_id == line.participant_id:
                         participant = all_participants.get(event.participant_id)
                         # Korrektur: Access the correct value from the Enum
                         explanation.append(
-                            f"Event: {event.event_type.value.capitalize()} von {participant.name}, Menge: {event.quantity} {event.unit}, Preis: {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh."
+                            f"Event: {event.event_type.value.capitalize()} von {participant.name} ({participant.role.value}), Menge: {event.quantity} {event.unit}, Preis: {event.meta.get('price_eur_per_kwh', 0)} EUR/kWh."
                         )
                 line_data["explanation"] = explanation
             
