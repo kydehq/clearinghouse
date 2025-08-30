@@ -16,13 +16,14 @@
         .btn-secondary:hover { background-color: #e2e8f0; }
         .flex-container { display: flex; gap: 1rem; }
         .flex-item { flex: 1; }
+        textarea { width: 100%; border-radius: 0.5rem; padding: 0.5rem; border: 1px solid #e2e8f0; }
     </style>
 </head>
 <body class="p-8">
     <div class="max-w-7xl mx-auto space-y-8">
         <div class="card">
             <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold">API-Dashboard (Tag 1 Demo)</h1>
+                <h1 class="text-3xl font-bold">API-Dashboard (Tag 2 Demo)</h1>
                 <a href="/" class="btn btn-secondary">← Zurück</a>
             </div>
             <p class="text-gray-600">
@@ -38,8 +39,18 @@
         </div>
 
         <div class="card space-y-6">
-            <h2 class="text-xl font-semibold">2. Netting Preview Abfragen</h2>
-            <p class="text-gray-600">Frage den optimierten Zahlungsplan über <code>/v1/netting/preview</code> ab.</p>
+            <h2 class="text-xl font-semibold">2. Policy-Aware Netting Preview</h2>
+            <p class="text-gray-600">Passe die Policy an und frage den optimierten Zahlungsplan ab.</p>
+            <label for="policy-input" class="block text-sm font-medium text-gray-700">Policy (JSON):</label>
+            <textarea id="policy-input" rows="8" class="font-mono">
+{
+  "use_case": "mieterstrom",
+  "min_payment_threshold_eur": 0.0,
+  "local_pv_price_eur_kwh": 0.25,
+  "feed_in_price_eur_kwh": 0.08,
+  "vpp_sale_price_eur_kwh": 0.10
+}
+            </textarea>
             <button onclick="getNettingPreview()" class="btn btn-primary">Netting Preview abfragen</button>
             <pre id="response-netting" class="mt-4"></pre>
         </div>
@@ -86,18 +97,6 @@
                 "price_eur_per_kwh": 0.35
             },
         ];
-
-        const nettingPayload = {
-            "use_case": "mieterstrom",
-            "policy_body": {
-                "local_pv_price_eur_kwh": 0.25,
-                "feed_in_price_eur_kwh": 0.08,
-                "vpp_sale_price_eur_kwh": 0.10
-            },
-            "start_time": new Date(Date.now() - 86400000 * 2).toISOString(), // vor 2 Tagen
-            "end_time": new Date().toISOString(),
-            "community_id": "community-a"
-        };
         
         async function sendEvents() {
             const responseElement = document.getElementById('response-events');
@@ -119,6 +118,16 @@
             const responseElement = document.getElementById('response-netting');
             responseElement.textContent = 'Frage Netting Preview ab...';
             try {
+                const policyInput = document.getElementById('policy-input').value;
+                const policyBody = JSON.parse(policyInput);
+                
+                const nettingPayload = {
+                    "use_case": policyBody.use_case,
+                    "policy_body": policyBody,
+                    "start_time": new Date(Date.now() - 86400000 * 2).toISOString(),
+                    "end_time": new Date().toISOString()
+                };
+
                 const response = await fetch(`${BASE_URL}/v1/netting/preview`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

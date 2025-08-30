@@ -13,12 +13,16 @@ EPS = 1e-9
 
 def create_transaction_hash(data: Dict) -> str:
     """Creates a SHA-256 hash for a given transaction data."""
-    # Ensure data is sorted to create a consistent hash
     sorted_data = json.dumps(data, sort_keys=True)
     return hashlib.sha256(sorted_data.encode('utf-8')).hexdigest()
 
-def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dict[int, float], Dict[str, float], List[Dict]]:
-    """Bilaterales Netting zur Reduktion von Zahlungen."""
+def apply_bilateral_netting(
+    participants_balances: Dict[int, dict], 
+    policy_body: Dict[str, any]
+) -> Tuple[Dict[int, float], Dict[str, float], List[Dict]]:
+    """Bilaterales Netting mit Policy-Awareness."""
+    min_threshold = float(policy_body.get('min_payment_threshold_eur', 0.0))
+
     internal_netted = {}
     total_abs_before_internal = 0.0
 
@@ -44,14 +48,17 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
         creditor_id, credit_amount = positive_balances[i]
         debtor_id, debt_amount = negative_balances[j]
         transfer_amount = min(credit_amount, debt_amount)
-        if transfer_amount > EPS:
+
+        # Apply policy-aware logic: skip if below threshold
+        if transfer_amount > min_threshold:
             transfers.append({
                 'from_id': debtor_id,
                 'to_id': creditor_id,
                 'amount_eur': round(transfer_amount, 2)
             })
-        positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
-        negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
+            positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
+            negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
+        
         if positive_balances[i][1] < EPS: i += 1
         if negative_balances[j][1] < EPS: j += 1
 
@@ -62,7 +69,6 @@ def apply_bilateral_netting(participants_balances: Dict[int, dict]) -> Tuple[Dic
 
     total_abs_after_bilateral = sum(abs(balance) for balance in final_balances.values())
     
-    # KPIs berechnen
     gross_volume = sum(abs(balance['credit']) + abs(balance['debit']) for balance in participants_balances.values())
     net_volume = sum(abs(balance) for balance in final_balances.values())
     netting_efficiency = 1 - (net_volume / gross_volume) if gross_volume > 0 else 0
@@ -91,14 +97,6 @@ def apply_policy_and_settle(
     policy_body: dict,
     events: Iterable[UsageEvent]
 ) -> Tuple[SettlementBatch, Dict, Dict]:
-    """
-    Double-Entry-Settlement (Mieterstrom):
-      - local_pv/battery -> TENANT/COMMERCIAL zahlen an LANDLORD (Policy-Preis).
-      - grid_external    -> TENANT/COMMERCIAL zahlen an EXTERNAL_MARKET (Spot/CSV).
-      - grid_feed        -> EXTERNAL_MARKET zahlt an LANDLORD (Einspeise-Preis).
-      - vpp_sale         -> EXTERNAL_MARKET zahlt an LANDLORD (VPP-Preis).
-      - base_fee (EUR)   -> TENANT/COMMERCIAL zahlen an OPERATOR.
-    """
     if use_case != 'mieterstrom':
         raise ValueError(f"Unbekannter use_case: {use_case}")
 
@@ -153,9 +151,8 @@ def apply_policy_and_settle(
                     cost = qty * price_meta
                     result[p.id]['debit'] += cost
                     result[external.id]['credit'] += cost
-            # PRODUCTION/GENERATION -> kein Geldfluss
 
-    final_balances, netting_stats, transfers = apply_bilateral_netting(result)
+    final_balances, netting_stats, transfers = apply_bilateral_netting(result, policy_body)
 
     participant_result: Dict[int, Dict[str, float]] = {}
     all_ids = set(result.keys()) | set(final_balances.keys())
@@ -172,13 +169,10 @@ def apply_policy_and_settle(
     batch = SettlementBatch(use_case=use_case)
     db.add(batch)
     db.flush()
-    db.refresh(batch) # Get batch ID
+    db.refresh(batch)
 
-    # Create and store SettlementLines with unique hashes
     for pid, final_net in final_balances.items():
         if abs(final_net) < EPS: continue
-
-        # The data for the hash is the transaction itself
         transaction_data = {
             "batch_id": batch.id,
             "participant_id": pid,
@@ -192,7 +186,7 @@ def apply_policy_and_settle(
             participant_id=pid,
             amount_eur=round(final_net, 2),
             description=f"Net after bilateral netting ({use_case})",
-            proof_hash=transaction_hash # Store the hash here
+            proof_hash=transaction_hash
         ))
     
     db.commit()
