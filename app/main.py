@@ -89,9 +89,9 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
                 db.add(p)
                 new_participants_list.append(p)
                 participant_map_dict[ext_id] = p
-        
+
         if new_participants_list: db.flush()
-        
+
         usage_events: list[UsageEvent] = []
         for event in events:
             ext_id = event.participant_id
