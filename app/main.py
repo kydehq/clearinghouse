@@ -230,6 +230,7 @@ def _generate_human_readable_explanation(participant, events, final_amount, use_
     
     return summary
 
+# ---------- API-Route für Audit & Erklärung (Finalität) ----------
 @app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
 def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = False):
     try:
@@ -239,8 +240,18 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
         
         lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
         
-        relevant_events = db.query(UsageEvent).all()
+        # Verbessert: Frage nur Events im Zeitraum des Batches ab
+        relevant_events = db.query(UsageEvent).filter(
+            UsageEvent.timestamp >= batch.start_time,
+            UsageEvent.timestamp <= batch.end_time
+        ).all()
+        
         all_participants = {p.id: p for p in db.query(Participant).all()}
+        
+        # Erstelle ein Dictionary für den schnellen Zugriff auf Events pro Teilnehmer
+        participant_events_map = defaultdict(list)
+        for ev in relevant_events:
+            participant_events_map[ev.participant_id].append(ev)
         
         audit_data = {
             "batch_id": batch.id,
@@ -272,7 +283,8 @@ def audit_batch(batch_id: int, db: Session = Depends(get_db), explain: bool = Fa
             }
             
             if explain and participant:
-                participant_events = [e for e in relevant_events if e.participant_id == line.participant_id]
+                # Nutze das vorbereitete Dictionary
+                participant_events = participant_events_map.get(line.participant_id, [])
                 human_readable = _generate_human_readable_explanation(
                     participant, participant_events, line.amount_eur, batch.use_case
                 )
