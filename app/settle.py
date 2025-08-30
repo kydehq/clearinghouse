@@ -13,6 +13,7 @@ EPS = 1e-9
 
 def create_transaction_hash(data: Dict) -> str:
     """Creates a SHA-256 hash for a given transaction data."""
+    # Ensure data is sorted to create a consistent hash
     sorted_data = json.dumps(data, sort_keys=True)
     return hashlib.sha256(sorted_data.encode('utf-8')).hexdigest()
 
@@ -43,7 +44,6 @@ def apply_bilateral_netting(
 
     i, j = 0, 0
     while i < len(positive_balances) and j < len(negative_balances):
-        # FIX: Access the entire tuple, not just the float value
         creditor_id, credit_amount = positive_balances[i]
         debtor_id, debt_amount = negative_balances[j]
         

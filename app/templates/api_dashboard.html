@@ -17,13 +17,15 @@
         .flex-container { display: flex; gap: 1rem; }
         .flex-item { flex: 1; }
         textarea { width: 100%; border-radius: 0.5rem; padding: 0.5rem; border: 1px solid #e2e8f0; }
+        .input-group { display: flex; gap: 0.5rem; }
+        .input-group input { flex: 1; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; }
     </style>
 </head>
 <body class="p-8">
     <div class="max-w-7xl mx-auto space-y-8">
         <div class="card">
             <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold">API-Dashboard (Tag 2 Demo)</h1>
+                <h1 class="text-3xl font-bold">API-Dashboard (Tag 3 Demo)</h1>
                 <a href="/" class="btn btn-secondary">← Zurück</a>
             </div>
             <p class="text-gray-600">
@@ -53,6 +55,23 @@
             </textarea>
             <button onclick="getNettingPreview()" class="btn btn-primary">Netting Preview abfragen</button>
             <pre id="response-netting" class="mt-4"></pre>
+        </div>
+
+        <div class="card space-y-6">
+            <h2 class="text-xl font-semibold">3. Finalität auslösen</h2>
+            <p class="text-gray-600">Löse die Abrechnung aus. Die Plattform generiert nun unveränderliche Belege.</p>
+            <button onclick="executeSettlement()" class="btn btn-primary">Abrechnung ausführen</button>
+            <pre id="response-settle" class="mt-4"></pre>
+        </div>
+
+        <div class="card space-y-6">
+            <h2 class="text-xl font-semibold">4. Finalität verifizieren (Audit)</h2>
+            <p class="text-gray-600">Überprüfe die Unveränderlichkeit der Transaktion mit dem Proof Layer.</p>
+            <div class="input-group">
+                <input type="number" id="audit-batch-id" placeholder="Batch-ID eingeben" class="w-full">
+                <button onclick="auditSettlement()" class="btn btn-primary">Audit starten</button>
+            </div>
+            <pre id="response-audit" class="mt-4"></pre>
         </div>
     </div>
 
@@ -98,6 +117,9 @@
             },
         ];
         
+        // Globale Variable, um die Batch-ID zu speichern
+        let latestBatchId = null;
+
         async function sendEvents() {
             const responseElement = document.getElementById('response-events');
             responseElement.textContent = 'Sende Events...';
@@ -139,6 +161,54 @@
                 responseElement.textContent = 'Fehler: ' + error.message;
             }
         }
+
+        async function executeSettlement() {
+            const responseElement = document.getElementById('response-settle');
+            responseElement.textContent = 'Führe Abrechnung aus...';
+            try {
+                const policyInput = document.getElementById('policy-input').value;
+                const policyBody = JSON.parse(policyInput);
+
+                const settlePayload = {
+                    "use_case": policyBody.use_case,
+                    "policy_body": policyBody,
+                    "start_time": new Date(Date.now() - 86400000 * 2).toISOString(),
+                    "end_time": new Date().toISOString()
+                };
+                const response = await fetch(`${BASE_URL}/v1/settle/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settlePayload)
+                });
+                const data = await response.json();
+                
+                // Speichere die Batch-ID für den Audit
+                latestBatchId = data.batch_id;
+                document.getElementById('audit-batch-id').value = latestBatchId;
+
+                responseElement.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                responseElement.textContent = 'Fehler: ' + error.message;
+            }
+        }
+
+        async function auditSettlement() {
+            const responseElement = document.getElementById('response-audit');
+            const batchId = document.getElementById('audit-batch-id').value;
+            if (!batchId) {
+                responseElement.textContent = 'Bitte eine Batch-ID eingeben.';
+                return;
+            }
+            responseElement.textContent = 'Starte Audit...';
+            try {
+                const response = await fetch(`${BASE_URL}/v1/audit/${batchId}`);
+                const data = await response.json();
+                responseElement.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                responseElement.textContent = 'Fehler: ' + error.message;
+            }
+        }
+
     </script>
 </body>
 </html>
