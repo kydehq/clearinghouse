@@ -33,8 +33,6 @@ def apply_bilateral_netting(
         internal_netted[pid] = net
         total_abs_before_internal += abs(credit) + abs(debit)
 
-    total_abs_after_internal = sum(abs(net) for net in internal_netted.values())
-
     positive_balances = [(pid, amount) for pid, amount in internal_netted.items() if amount > EPS]
     negative_balances = [(pid, -amount) for pid, amount in internal_netted.items() if amount < -EPS]
     positive_balances.sort(key=lambda x: x[1], reverse=True)
@@ -45,28 +43,32 @@ def apply_bilateral_netting(
 
     i, j = 0, 0
     while i < len(positive_balances) and j < len(negative_balances):
-        creditor_id, credit_amount = positive_balances[i]
-        debtor_id, debt_amount = negative_balances[j]
+        creditor_id, credit_amount = positive_balances[i][1]
+        debtor_id, debt_amount = negative_balances[j][1]
+
         transfer_amount = min(credit_amount, debt_amount)
 
-        # Apply policy-aware logic: skip if below threshold
+        # Die Balances werden IMMER ausgeglichen
+        positive_balances[i] = (positive_balances[i][0], credit_amount - transfer_amount)
+        negative_balances[j] = (negative_balances[j][0], debt_amount - transfer_amount)
+
+        # Transaktion wird NUR DANN erstellt, wenn sie den Schwellenwert übersteigt
         if transfer_amount > min_threshold:
             transfers.append({
-                'from_id': debtor_id,
-                'to_id': creditor_id,
+                'from_id': negative_balances[j][0],
+                'to_id': positive_balances[i][0],
                 'amount_eur': round(transfer_amount, 2)
             })
-            positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
-            negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
-        
-        # Advance to the next non-zero balance
+
+        # Die Zeiger werden immer für den ausgeglichenen Teilnehmer weiterbewegt
         if positive_balances[i][1] < EPS: i += 1
         if negative_balances[j][1] < EPS: j += 1
 
-    for creditor_id, remaining_credit in positive_balances:
-        final_balances[creditor_id] = remaining_credit
-    for debtor_id, remaining_debt in negative_balances:
-        final_balances[debtor_id] = -remaining_debt
+    # Die verbleibenden Balancen werden in den finalen Balancen gespeichert
+    for creditor_id, remaining_credit in positive_balances[i:]:
+        final_balances[creditor_id] += remaining_credit
+    for debtor_id, remaining_debt in negative_balances[j:]:
+        final_balances[debtor_id] -= remaining_debt
 
     total_abs_after_bilateral = sum(abs(balance) for balance in final_balances.values())
     
