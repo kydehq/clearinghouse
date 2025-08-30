@@ -1,14 +1,17 @@
 from __future__ import annotations
 import os
+import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+# Lade die Umgebungsvariable
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL Umgebungsvariable ist nicht gesetzt.")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# Erstelle die SQLAlchemy Engine und Session
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 Base = declarative_base()
@@ -127,8 +130,8 @@ def ensure_min_schema():
         conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_batches (id SERIAL PRIMARY KEY);"""))
         _add_varchar_column_if_missing(conn, "settlement_batches", "use_case", "mieterstrom")
         _add_timestamptz_column_if_missing(conn, "settlement_batches", "created_at")
-        _add_timestamptz_column_if_missing('settlement_batch', 'start_time')
-        _add_timestamptz_column_if_missing('settlement_batch', 'end_time')
+        _add_timestamptz_column_if_missing(conn, 'settlement_batches', 'start_time')
+        _add_timestamptz_column_if_missing(conn, 'settlement_batches', 'end_time')
 
         # settlement_lines
         conn.execute(text("""CREATE TABLE IF NOT EXISTS settlement_lines (id SERIAL PRIMARY KEY);"""))
