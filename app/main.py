@@ -81,7 +81,8 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
             p = participant_map_dict.get(ext_id)
 
             if not p:
-                role = ParticipantRole.PROSUMER
+                # Korrektur: Role in Kleinbuchstaben konvertieren
+                role = ParticipantRole.PROSUMER.lower()
                 p = Participant(external_id=ext_id, name=f"Participant {ext_id}", role=role)
                 db.add(p)
                 new_participants_list.append(p)
@@ -98,6 +99,7 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
 
             usage_event = UsageEvent(
                 participant_id=p.id,
+                # Korrektur: event_type in Kleinbuchstaben konvertieren
                 event_type=EventType(event.event_type.lower()),
                 quantity=event.quantity,
                 unit=event.unit,
