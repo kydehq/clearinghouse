@@ -59,6 +59,7 @@ def apply_bilateral_netting(
             positive_balances[i] = (creditor_id, credit_amount - transfer_amount)
             negative_balances[j] = (debtor_id, debt_amount - transfer_amount)
         
+        # Advance to the next non-zero balance
         if positive_balances[i][1] < EPS: i += 1
         if negative_balances[j][1] < EPS: j += 1
 
@@ -97,6 +98,14 @@ def apply_policy_and_settle(
     policy_body: dict,
     events: Iterable[UsageEvent]
 ) -> Tuple[SettlementBatch, Dict, Dict]:
+    """
+    Double-Entry-Settlement (Mieterstrom):
+      - local_pv/battery -> TENANT/COMMERCIAL zahlen an LANDLORD (Policy-Preis).
+      - grid_external    -> TENANT/COMMERCIAL zahlen an EXTERNAL_MARKET (Spot/CSV).
+      - grid_feed        -> EXTERNAL_MARKET zahlt an LANDLORD (Einspeise-Preis).
+      - vpp_sale         -> EXTERNAL_MARKET zahlt an LANDLORD (VPP-Preis).
+      - base_fee (EUR)   -> TENANT/COMMERCIAL zahlen an OPERATOR.
+    """
     if use_case != 'mieterstrom':
         raise ValueError(f"Unbekannter use_case: {use_case}")
 
@@ -152,6 +161,7 @@ def apply_policy_and_settle(
                     result[p.id]['debit'] += cost
                     result[external.id]['credit'] += cost
 
+    # FIX: Pass the policy_body to the netting function
     final_balances, netting_stats, transfers = apply_bilateral_netting(result, policy_body)
 
     participant_result: Dict[int, Dict[str, float]] = {}
