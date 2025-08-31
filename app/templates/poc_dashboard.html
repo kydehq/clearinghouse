@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KYDE – Magic Moment PoC</title>
+  <!-- Tailwind CDN (nur Graustufen genutzt) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Monochrom-Disziplin erzwingen */
+    :root {
+      --bg: #ffffff;
+      --fg: #0a0a0a;
+      --muted: #6b7280;     /* gray-500 */
+      --border: #e5e7eb;    /* gray-200 */
+      --panel: #f9fafb;     /* gray-50 */
+      --panel-strong: #111827; /* gray-900 */
+    }
+    html, body { background: var(--bg); color: var(--fg); }
+    /* schlichte Fokus-Ringe */
+    :focus-visible { outline: 2px dashed #111; outline-offset: 2px; }
+    /* Dezente Code-Optik */
+    pre code { font-feature-settings: "tnum"; }
+  </style>
+</head>
+<body class="antialiased text-gray-900">
+  <!-- Header -->
+  <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
+    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+      <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
+      <span class="font-semibold tracking-tight">Clearinghouse PoC</span>
+      <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
+      <span class="text-sm text-gray-500 hidden md:inline">From <strong>Chaos</strong> to <strong>Finality</strong> in one click</span>
+      <div class="ml-auto flex items-center gap-2">
+        <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
+        <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl p-4 md:p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- LEFT: Vorher -->
+    <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 class="font-semibold">1) Das Problem — Unsettled Chaos</h2>
+        <span id="live-badge" class="rounded-full border border-gray-300 px-2.5 py-0.5 text-xs">live</span>
+      </div>
+      <div class="p-4 space-y-4">
+        <!-- Metrics -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="rounded-lg border border-gray-200 p-3">
+            <div class="text-xs text-gray-500">Transaktionen</div>
+            <div id="m-tx" class="mt-1 text-2xl font-semibold tabular-nums">0</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3">
+            <div class="text-xs text-gray-500">Bruttovolumen</div>
+            <div id="m-gross" class="mt-1 text-2xl font-semibold tabular-nums">€0,00</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3">
+            <div class="text-xs text-gray-500">Geschätzte Gebühren</div>
+            <div id="m-estfees" class="mt-1 text-2xl font-semibold tabular-nums">€0,00</div>
+          </div>
+        </div>
+
+        <!-- Live Stream -->
+        <div class="rounded-lg border border-gray-200">
+          <div class="p-3 border-b border-gray-200 text-sm text-gray-600">Live-Transaktionsstrom</div>
+          <div class="h-[260px] overflow-auto">
+            <ul id="list-stream" class="p-3 space-y-2"></ul>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-sm text-gray-700">Simulierte Transaktionen</span>
+            <input id="inp-count" type="number" min="50" max="20000" value="500"
+                   class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus-visible:outline-none focus:ring-0 focus:border-gray-900"/>
+          </label>
+          <label class="block">
+            <span class="text-sm text-gray-700">Gebühr pro Tx (EUR)</span>
+            <input id="inp-fee" type="number" step="0.01" min="0" value="0.30"
+                   class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus-visible:outline-none focus:ring-0 focus:border-gray-900"/>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: Nachher -->
+    <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div class="p-4 border-b border-gray-200">
+        <h2 class="font-semibold">2) Die Lösung — Netted &amp; Settled</h2>
+      </div>
+      <div class="p-4 space-y-4">
+        <div class="flex items-center gap-3">
+          <button id="btn-run" class="inline-flex items-center rounded-lg border border-gray-900 bg-gray-900 text-white px-4 py-2 text-sm font-medium hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed">
+            ► Run Netting
+          </button>
+          <span id="badge-savings" class="hidden rounded-full border border-gray-300 px-2.5 py-0.5 text-xs"></span>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 p-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="text-xs text-gray-500">Netted Payouts</div>
+              <div id="m-netted" class="mt-1 text-2xl font-semibold tabular-nums">0</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="text-xs text-gray-500">Tatsächliche Gebühren</div>
+              <div id="m-actual" class="mt-1 text-2xl font-semibold tabular-nums">€0,00</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="text-xs text-gray-500">Ersparnis</div>
+              <div id="m-savings" class="mt-1 text-2xl font-semibold tabular-nums">€0,00</div>
+            </div>
+          </div>
+
+          <!-- Simple Bar "Chart" (CSS) -->
+          <div class="mt-4">
+            <div class="text-sm text-gray-600 mb-2">Kompression (Before vs After)</div>
+            <div class="h-52 border border-gray-200 rounded-lg p-3 flex items-end gap-6">
+              <div class="flex-1 flex flex-col items-center justify-end">
+                <div id="bar-before" class="w-10 bg-gray-900 rounded-t" style="height: 10%;"></div>
+                <div class="mt-2 text-xs text-gray-600">Before</div>
+              </div>
+              <div class="flex-1 flex flex-col items-center justify-end">
+                <div id="bar-after" class="w-10 bg-gray-700 rounded-t" style="height: 5%;"></div>
+                <div class="mt-2 text-xs text-gray-600">After</div>
+              </div>
+              <div class="flex-1 flex flex-col items-center justify-center text-center">
+                <div class="text-xs text-gray-500">Ratio</div>
+                <div id="lbl-ratio" class="mt-1 text-lg font-semibold tabular-nums">–</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Netted payouts -->
+          <div id="wrap-payouts" class="mt-4 hidden">
+            <div class="mb-2 text-sm text-gray-600">Netted Payouts</div>
+            <div id="grid-payouts" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOTTOM: API Proof -->
+    <section class="rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-2">
+      <div class="p-4 border-b border-gray-200">
+        <h2 class="font-semibold">3) API Proof — Real Request &amp; Response</h2>
+      </div>
+      <div class="p-4 space-y-3">
+        <div class="flex items-center gap-2">
+          <button id="tab-req" class="rounded border border-gray-300 px-3 py-1.5 text-sm bg-gray-900 text-white">Request</button>
+          <button id="tab-res" class="rounded border border-gray-300 px-3 py-1.5 text-sm">Response</button>
+          <div class="ml-auto flex items-center gap-2">
+            <button id="btn-copy" class="rounded border border-gray-300 px-3 py-1.5 text-sm">Copy</button>
+            <span id="copy-done" class="text-xs text-gray-500 hidden">Kopiert</span>
+          </div>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50">
+          <pre class="overflow-auto p-4 text-xs leading-relaxed"><code id="code-area">// Run the demo to see the request & response</code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // ===== Helpers =====
+    const fmtEUR = new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 2 });
+    const PARTICIPANTS = ["Alice", "Bob", "Clara", "Operator-X", "City-Y", "Provider-Z"];
+
+    const $ = (sel) => document.querySelector(sel);
+    const list = $("#list-stream");
+    const mTx = $("#m-tx");
+    const mGross = $("#m-gross");
+    const mEst = $("#m-estfees");
+    const liveBadge = $("#live-badge");
+
+    const inpCount = $("#inp-count");
+    const inpFee = $("#inp-fee");
+    const btnRun = $("#btn-run");
+    const btnRerun = $("#btn-rerun");
+
+    const mNetted = $("#m-netted");
+    const mActual = $("#m-actual");
+    const mSavings = $("#m-savings");
+    const badgeSavings = $("#badge-savings");
+
+    const barBefore = $("#bar-before");
+    const barAfter = $("#bar-after");
+    const lblRatio = $("#lbl-ratio");
+
+    const wrapPayouts = $("#wrap-payouts");
+    const gridPayouts = $("#grid-payouts");
+
+    const tabReq = $("#tab-req");
+    const tabRes = $("#tab-res");
+    const codeArea = $("#code-area");
+    const btnCopy = $("#btn-copy");
+    const copyDone = $("#copy-done");
+
+    let streaming = true;
+    let timer = null;
+    let idCounter = 0;
+    let txCount = 0;
+    let gross = 0;
+    let estFees = 0;
+
+    let lastRequest = null;
+    let lastResponse = null;
+    let activeTab = "req";
+
+    function startStream() {
+      stopStream();
+      streaming = true;
+      liveBadge.textContent = "live";
+      timer = setInterval(() => {
+        const p = PARTICIPANTS[Math.floor(Math.random() * PARTICIPANTS.length)];
+        let amt = +(0.5 + Math.random() * 4.5).toFixed(2);
+        if (p.includes("Operator") || p.includes("City") || p.includes("Provider")) amt = -amt;
+
+        idCounter += 1;
+        const li = document.createElement("li");
+        li.className = "flex items-center justify-between rounded border border-gray-200 px-3 py-2 text-sm";
+        li.innerHTML = `<span class="font-medium">${p}</span><span class="tabular-nums">${amt < 0 ? "-" : ""}${fmtEUR.format(Math.abs(amt))}</span>`;
+        list.prepend(li);
+        while (list.children.length > 100) list.removeChild(list.lastChild);
+
+        txCount += 1;
+        gross = +(gross + Math.abs(amt)).toFixed(2);
+        estFees = +(estFees + parseFloat(inpFee.value || "0")).toFixed(2);
+
+        renderBefore();
+      }, 80);
+    }
+
+    function stopStream() {
+      streaming = false;
+      liveBadge.textContent = "paused";
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+
+    function renderBefore() {
+      mTx.textContent = (txCount || parseInt(inpCount.value || "0", 10)).toString();
+      mGross.textContent = fmtEUR.format(gross);
+      mEst.textContent = fmtEUR.format(estFees);
+    }
+
+    function resetAll() {
+      stopStream();
+      list.innerHTML = "";
+      idCounter = 0;
+      txCount = 0;
+      gross = 0;
+      estFees = 0;
+      renderBefore();
+
+      mNetted.textContent = "0";
+      mActual.textContent = "€0,00";
+      mSavings.textContent = "€0,00";
+      badgeSavings.classList.add("hidden");
+      lblRatio.textContent = "–";
+      barBefore.style.height = "10%";
+      barAfter.style.height = "5%";
+      gridPayouts.innerHTML = "";
+      wrapPayouts.classList.add("hidden");
+
+      lastRequest = null;
+      lastResponse = null;
+      activeTab = "req";
+      renderCode();
+      btnRun.disabled = false;
+
+      startStream();
+    }
+
+    function renderCode() {
+      if (activeTab === "req") {
+        if (lastRequest) codeArea.textContent = JSON.stringify(lastRequest, null, 2);
+        else codeArea.textContent = "// Run the demo to see the request & response";
+        tabReq.classList.add("bg-gray-900", "text-white");
+        tabRes.classList.remove("bg-gray-900", "text-white");
+      } else {
+        if (lastResponse) codeArea.textContent = JSON.stringify(lastResponse, null, 2);
+        else codeArea.textContent = "// Noch keine Response – bitte Demo ausführen";
+        tabRes.classList.add("bg-gray-900", "text-white");
+        tabReq.classList.remove("bg-gray-900", "text-white");
+      }
+    }
+
+    function renderAfter(resp) {
+      const after = resp.after;
+      mNetted.textContent = String(after.metrics.netted_transactions);
+      mActual.textContent = fmtEUR.format(after.metrics.actual_fees_eur);
+      mSavings.textContent = fmtEUR.format(after.metrics.savings_eur);
+      badgeSavings.textContent = "Savings " + fmtEUR.format(after.metrics.savings_eur);
+      badgeSavings.classList.remove("hidden");
+
+      const beforeTx = txCount || parseInt(inpCount.value || "0", 10);
+      const afterTx = after.metrics.netted_transactions || 0;
+      const maxTx = Math.max(1, beforeTx);
+      const beforeH = Math.max(6, Math.min(100, Math.round((beforeTx / maxTx) * 100)));
+      const afterH = Math.max(2, Math.min(100, Math.round((afterTx / maxTx) * 100)));
+      barBefore.style.height = beforeH + "%";
+      barAfter.style.height = afterH + "%";
+      lblRatio.textContent = (resp.after.metrics.compression_ratio || (beforeTx && afterTx ? (beforeTx/afterTx).toFixed(2) : "–")) + "×";
+
+      gridPayouts.innerHTML = "";
+      Object.entries(after.netted_payouts).forEach(([pid, amount]) => {
+        const div = document.createElement("div");
+        div.className = "flex items-center justify-between rounded border border-gray-200 px-3 py-2";
+        const sign = amount < 0 ? "-" : "";
+        div.innerHTML = `<span class="font-medium">${pid}</span><span class="tabular-nums">${sign}${fmtEUR.format(Math.abs(amount))}</span>`;
+        gridPayouts.appendChild(div);
+      });
+      if (Object.keys(after.netted_payouts).length > 0) {
+        wrapPayouts.classList.remove("hidden");
+      }
+    }
+
+    // ===== Event Handlers =====
+    btnRun.addEventListener("click", async () => {
+      stopStream();
+      btnRun.disabled = true;
+
+      const body = {
+        transaction_count: parseInt(inpCount.value || "0", 10),
+        fee_per_transaction_eur: parseFloat(inpFee.value || "0"),
+      };
+      lastRequest = body;
+      activeTab = "req";
+      renderCode();
+
+      try {
+        const res = await fetch("/v1/poc/run-demo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        lastResponse = data;
+        renderAfter(data);
+        activeTab = "res";
+        renderCode();
+      } catch (err) {
+        alert("Fehler: " + (err?.message || err));
+        btnRun.disabled = false;
+        startStream();
+      }
+    });
+
+    btnRerun.addEventListener("click", resetAll);
+
+    tabReq.addEventListener("click", () => { activeTab = "req"; renderCode(); });
+    tabRes.addEventListener("click", () => { activeTab = "res"; renderCode(); });
+
+    btnCopy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(codeArea.textContent || "");
+        copyDone.classList.remove("hidden");
+        setTimeout(() => copyDone.classList.add("hidden"), 1200);
+      } catch (_) {}
+    });
+
+    // ===== Init =====
+    renderBefore();
+    renderCode();
+    startStream();
+  </script>
+</body>
+</html>
