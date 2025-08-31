@@ -59,6 +59,7 @@ class SettlePayload(BaseModel):
 
 class PocDemoPayload(BaseModel):
     transaction_count: int = 500
+    use_case: Optional[str] = "mobility"   # <— neu
     # Backwards-compat optional fields
     fee_per_transaction_eur: Optional[float] = None
     scenario: Optional[str] = None
@@ -66,6 +67,7 @@ class PocDemoPayload(BaseModel):
     operators: Optional[int] = None
     cities: Optional[int] = None
     policy_body: Optional[Dict[str, Any]] = None
+
 
 # ---------- Startup ----------
 
@@ -192,42 +194,29 @@ def _fare_for(mode: str, rng: random.Random) -> float:
 
 @app.post("/v1/poc/run-demo")
 def run_poc_demo(payload: PocDemoPayload):
-    """
-    Policy-DSL (vereinfacht):
-
-    {
-      "scenario": "mixed" | "scooter" | "car",
-      "fees": {"per_payout_eur": 0.30},
-      "actors": {"riders": 400, "fleet_partners": 20, "cities": 10},
-      "splits": {"fleet_share": 0.90, "city_share": 0.10},
-      "thresholds": {"min_payout_eur": 1.00},
-      "rules": [
-        {"match":{"role":"city"},          "min_payout_eur":5.00},
-        {"match":{"role":"fleet_partner"}, "min_payout_eur":1.00},
-        {"match":{"role":"all"},           "round":"half_up"}
-      ],
-      "optimize": {"distribution":"uniform" | "concentrated"}
-    }
-
-    Hinweis: Abwärtskompatibel zu "operators"/"operator_share".
-    """
     policy = payload.policy_body or {}
+    use_case = (payload.use_case or policy.get("use_case") or "mobility").lower()
+    if use_case == "energy":
+        return _simulate_energy(policy, payload.transaction_count)
+    return _simulate_mobility(policy, payload.transaction_count)
 
-    # --- Inputs / Policy ---
-    scenario = (policy.get("scenario") or payload.scenario or "mixed").lower()
+
+# ------------------ Mobility (bestehende Logik, kompakt extrahiert) ------------------
+
+def _simulate_mobility(policy: Dict[str, Any], tx_count: int):
+    # Policy lesen
+    scenario = (policy.get("scenario") or "mixed").lower()
     actors = policy.get("actors") or {}
-    riders_n = int(actors.get("riders") or payload.riders or 400)
-    # backward compat: operators -> fleet_partners
-    fleet_n = int(actors.get("fleet_partners") or actors.get("operators") or payload.operators or 20)
-    cities_n = int(actors.get("cities") or payload.cities or 10)
+    riders_n = int(actors.get("riders") or 400)
+    fleet_n  = int(actors.get("fleet_partners") or actors.get("operators") or 20)
+    cities_n = int(actors.get("cities") or 10)
 
     splits = policy.get("splits") or {}
-    # backward compat: operator_share -> fleet_share
     fleet_share = float(splits.get("fleet_share") or splits.get("operator_share") or 0.90)
     city_share  = float(splits.get("city_share") or 0.10)
 
     fees = policy.get("fees") or {}
-    fee_per_payout = float(fees.get("per_payout_eur") or payload.fee_per_transaction_eur or 0.30)
+    fee_per_payout = float(fees.get("per_payout_eur") or 0.30)
 
     thresholds = policy.get("thresholds") or {}
     min_payout_global = float(thresholds.get("min_payout_eur") or 0.0)
@@ -238,20 +227,14 @@ def run_poc_demo(payload: PocDemoPayload):
     min_fleet = min_payout_global
     for r in rules:
         m = (r.get("match") or {})
-        if m.get("role") == "all" and r.get("round"):
-            round_mode = r["round"]
-        if m.get("role") == "city" and r.get("min_payout_eur") is not None:
-            min_city = float(r["min_payout_eur"])
-        # backward compat: operator -> fleet_partner
-        if m.get("role") in ("fleet_partner", "operator") and r.get("min_payout_eur") is not None:
-            min_fleet = float(r["min_payout_eur"])
+        if m.get("role") == "all" and r.get("round"): round_mode = r["round"]
+        if m.get("role") == "city" and r.get("min_payout_eur") is not None: min_city = float(r["min_payout_eur"])
+        if m.get("role") in ("fleet_partner", "operator") and r.get("min_payout_eur") is not None: min_fleet = float(r["min_payout_eur"])
 
-    optimize = policy.get("optimize") or {}
-    distribution = (optimize.get("distribution") or "uniform").lower()
+    distribution = (policy.get("optimize") or {}).get("distribution","uniform").lower()
 
-    # --- Helpers ---
     rng = random.Random(42)
-    riders = [f"Rider-{i:04d}" for i in range(1, max(1, riders_n) + 1)]
+    riders = [f"Rider-{i:04d}" for i in range(1, max(1, riders_n)+1)]
     fleet  = [f"Fleet-{i+1}" for i in range(max(1, fleet_n))]
     cities = [f"City-{i+1}"  for i in range(max(1, cities_n))]
 
@@ -259,69 +242,42 @@ def run_poc_demo(payload: PocDemoPayload):
         if len(lst) <= 1: return lst[0]
         if distribution == "concentrated":
             top = max(1, int(len(lst) * 0.2))
-            if rng.random() < k_weight:
-                return lst[rng.randrange(top)]
+            if rng.random() < k_weight: return lst[rng.randrange(top)]
         return lst[rng.randrange(len(lst))]
 
-    def _fare_for(mode: str, r: random.Random) -> float:
-        if mode == "car":     return round(r.uniform(8.0, 30.0), 2)
-        if mode == "scooter": return round(r.uniform(1.0, 5.0), 2)
-        roll = r.random()
-        if roll < 0.6: return round(r.uniform(1.0, 5.0), 2)      # scooter
-        if roll < 0.9: return round(r.uniform(8.0, 30.0), 2)     # car
-        return round(r.uniform(0.5, 3.0), 2)                      # misc
-
-    def _round_amt(x: float, mode: str) -> float:
-        d = Decimal(str(x))
-        if mode == "bankers":
-            return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
-        return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-
-    # --- Simulation: Events -> Obligations ---
     gross_volume = 0.0
     raw_transactions: List[Dict[str, Any]] = []
-
-    # Wir trennen Verpflichtungen:
-    # - operator_owes_party[pid]  = Operator zahlt an Partei (Fleet/City)  (EUR, +)
-    # - party_owes_operator[pid]  = Partei zahlt an Operator (z.B. Penalty) (EUR, +)
     operator_owes_party: Dict[str, float] = defaultdict(float)
     party_owes_operator: Dict[str, float] = defaultdict(float)
     obligations_created = 0
+    penalties_count = 0
 
-    for _ in range(max(1, payload.transaction_count)):
+    for _ in range(max(1, tx_count)):
         rider = rng.choice(riders)
+        # eigene Helper: _fare_for & _round_amt sind in deiner Datei schon definiert
         fare = _fare_for(scenario, rng)
         gross_volume += fare
         raw_transactions.append({"participant_id": rider, "amount": fare})
 
-        fp = pick_weighted(fleet)
-        ct = pick_weighted(cities)
-
-        # Umsatz-Splits erzeugen je Ride
+        fp = pick_weighted(fleet); ct = pick_weighted(cities)
         operator_owes_party[fp] += fare * fleet_share; obligations_created += 1
         operator_owes_party[ct] += fare * city_share;  obligations_created += 1
 
-        # Ein kleiner Teil der Rides erzeugt Gegenflüsse (z.B. Strafgebühr/Adjustments),
-        # die an den Operator zurückfließen -> interne Verrechnung möglich
         if rng.random() < 0.12:
             penalty = round(rng.uniform(0.5, 3.0), 2)
             party_owes_operator[fp] += penalty
-            obligations_created += 1
+            obligations_created += 1; penalties_count += 1
 
-    # --- Interner Offset & Nettobeträge je Partei ---
-    # Internal offset = Summe der min(Operator->Partei, Partei->Operator) je Partei (vor Runden/Thresholds)
+    # Offset & Nettos
     internal_offset_eur = 0.0
-    balances: Dict[str, float] = {}  # negativ = Auszahlung an Partei, positiv = Einzug von Partei
-
-    all_parties = set(operator_owes_party.keys()) | set(party_owes_operator.keys())
+    balances: Dict[str, float] = {}
+    all_parties = set(operator_owes_party) | set(party_owes_operator)
     for pid in all_parties:
         to_party = operator_owes_party.get(pid, 0.0)
         to_op    = party_owes_operator.get(pid, 0.0)
         internal_offset_eur += min(to_party, to_op)
-        net = to_party - to_op
-        balances[pid] = -net  # negativ = Operator zahlt an Partei
+        balances[pid] = -(to_party - to_op)  # negativ = Auszahlung
 
-    # --- Runden & Schwellen nach Rolle ---
     def role_of(pid: str) -> str:
         if pid.startswith("City-"):  return "city"
         if pid.startswith("Fleet-"): return "fleet_partner"
@@ -334,43 +290,200 @@ def run_poc_demo(payload: PocDemoPayload):
         thr = min_payout_global
         if role == "city":          thr = max(thr, min_city)
         if role == "fleet_partner": thr = max(thr, min_fleet)
-        if abs(amt_r) < thr:
-            amt_r = 0.0
-        if abs(amt_r) >= 0.01:
-            rounded[pid] = round(amt_r, 2)
+        if abs(amt_r) >= max(0.01, thr): rounded[pid] = round(amt_r, 2)
 
     netted_payouts = dict(sorted(rounded.items(), key=lambda kv: abs(kv[1]), reverse=True))
     netted_transaction_count = len(netted_payouts)
 
-    estimated_fees = payload.transaction_count * fee_per_payout
-    actual_fees    = netted_transaction_count * fee_per_payout
-    compression_ratio = round(payload.transaction_count / max(1, netted_transaction_count), 2)
+    est_fees = tx_count * fee_per_payout
+    act_fees = netted_transaction_count * fee_per_payout
+    ratio = round(tx_count / max(1, netted_transaction_count), 2)
 
     return {
         "before": {
             "transaction_stream": raw_transactions[:50],
             "metrics": {
-                "total_transactions": payload.transaction_count,
+                "total_transactions": tx_count,
                 "gross_volume_eur": round(gross_volume, 2),
-                "estimated_fees_eur": round(estimated_fees, 2),
-                "obligations_created": int(obligations_created)
+                "estimated_fees_eur": round(est_fees, 2),
+                "obligations_created": int(obligations_created),
+                "obligations_breakdown": { "share_splits": int(tx_count*2), "penalties": int(penalties_count) }
             }
         },
         "after": {
             "netted_payouts": netted_payouts,
             "metrics": {
                 "netted_transactions": netted_transaction_count,
-                "actual_fees_eur": round(actual_fees, 2),
-                "savings_eur": round(estimated_fees - actual_fees, 2),
-                "compression_ratio": compression_ratio,
+                "actual_fees_eur": round(act_fees, 2),
+                "savings_eur": round(est_fees - act_fees, 2),
+                "compression_ratio": ratio,
                 "internal_offset_eur": round(internal_offset_eur, 2)
             }
         },
         "api_proof": {
-            "request_body_snippet": {
-                "transaction_count": payload.transaction_count,
-                "policy_body": policy
-            },
+            "request_body_snippet": { "transaction_count": tx_count, "policy_body": policy, "use_case": "mobility" },
             "response_body": { "final_net_balances": netted_payouts }
         }
     }
+
+
+# ------------------ Energy Community (realistisches N↔N, Österreich-artig) ------------------
+
+def _simulate_energy(policy: Dict[str, Any], tx_count: int):
+    # Teilnehmer & Parameter
+    actors = policy.get("actors") or {}
+    participants_n = int(actors.get("participants") or actors.get("riders") or 120)  # Haushalte/Prosumer
+    rng = random.Random(43)
+
+    # Preise (können später in policy.prices konfiguriert werden)
+    prices = (policy.get("prices") or {})
+    pv_price      = float(prices.get("pv_eur_per_kwh")      or 0.14)  # Vergütung an Prosumer
+    local_price   = float(prices.get("local_eur_per_kwh")   or 0.18)  # Haushalt zahlt an Community
+    grid_min      = float(prices.get("grid_min_eur_per_kwh")or 0.25)
+    grid_max      = float(prices.get("grid_max_eur_per_kwh")or 0.45)
+    flex_min      = float(prices.get("flex_min_eur_per_kwh")or 0.08)
+    flex_max      = float(prices.get("flex_max_eur_per_kwh")or 0.16)
+    community_fee = float(prices.get("community_fee_eur")   or 1.50)
+
+    # Schwellen/Rundung übernehmen (wir mappen fleet->household/prosumer, city->DSO)
+    thresholds = policy.get("thresholds") or {}
+    min_payout_global = float(thresholds.get("min_payout_eur") or 0.0)
+    rules = policy.get("rules") or []
+    round_mode = "half_up"
+    min_household = min_payout_global
+    min_dso = min_payout_global
+    for r in rules:
+        m = (r.get("match") or {})
+        if m.get("role") == "all" and r.get("round"): round_mode = r["round"]
+        if m.get("role") in ("fleet_partner","operator"):  # als Household/Prosumer interpretieren
+            if r.get("min_payout_eur") is not None: min_household = float(r["min_payout_eur"])
+        if m.get("role") == "city":  # als DSO interpretieren
+            if r.get("min_payout_eur") is not None: min_dso = float(r["min_payout_eur"])
+
+    # Entitäten
+    HH = [f"HH-{i:04d}" for i in range(1, participants_n+1)]
+    DSO = "DSO"
+    MARKET = "External-Market"
+
+    # Pools
+    local_pool_kwh = 0.0  # erzeugter PV-Strom in Community
+
+    # Verpflichtungen rund um "Community-Treasury" (Operator-Idee beibehalten)
+    operator_owes_party: Dict[str, float] = defaultdict(float)   # Community -> Partei (Prosumer/DSO)
+    party_owes_operator: Dict[str, float] = defaultdict(float)   # Partei -> Community (Haushalt/Market)
+
+    obligations_created = 0
+    breakdown = {"consumption": 0, "pv_generation": 0, "flex_revenue": 0, "fees": 0}
+
+    # Events generieren
+    for _ in range(max(1, tx_count)):
+        roll = rng.random()
+
+        # 0.55 Konsum, 0.35 PV, 0.10 Flex
+        if roll < 0.55:
+            h = rng.choice(HH)
+            kwh = round(rng.uniform(0.6, 4.0), 2)
+            grid_price = round(rng.uniform(grid_min, grid_max), 2)
+
+            # 50% des Verbrauchs versuchen wir aus dem lokalen Pool zu decken
+            want_local = round(0.5 * kwh, 2)
+            use_local  = min(local_pool_kwh, want_local)
+            from_grid  = round(kwh - use_local, 2)
+
+            if use_local > 0:
+                party_owes_operator[h] += use_local * local_price
+                local_pool_kwh = round(local_pool_kwh - use_local, 4)
+                obligations_created += 1; breakdown["consumption"] += 1
+
+            if from_grid > 0:
+                operator_owes_party[DSO] += from_grid * grid_price
+                obligations_created += 1; breakdown["consumption"] += 1
+
+            # gelegentliche Community-Fee
+            if rng.random() < 0.05:
+                party_owes_operator[h] += community_fee
+                obligations_created += 1; breakdown["fees"] += 1
+
+        elif roll < 0.90:
+            # PV-Erzeugung – Prosumer werden von Community vergütet, Pool steigt
+            h = rng.choice(HH)
+            gen = round(rng.uniform(0.3, 2.5), 2)
+            operator_owes_party[h] += gen * pv_price
+            local_pool_kwh = round(local_pool_kwh + gen, 4)
+            obligations_created += 1; breakdown["pv_generation"] += 1
+
+        else:
+            # Flex-/Regelenergie – Market zahlt an Community
+            flex = round(rng.uniform(0.5, 3.0), 2)
+            price = round(rng.uniform(flex_min, flex_max), 2)
+            party_owes_operator[MARKET] += flex * price
+            obligations_created += 1; breakdown["flex_revenue"] += 1
+
+    # Interner Offset & Nettos
+    internal_offset_eur = 0.0
+    balances: Dict[str, float] = {}
+    all_parties = set(operator_owes_party) | set(party_owes_operator)
+    for pid in all_parties:
+        to_party = operator_owes_party.get(pid, 0.0)
+        to_op    = party_owes_operator.get(pid, 0.0)
+        internal_offset_eur += min(to_party, to_op)
+        balances[pid] = -(to_party - to_op)  # negativ = Auszahlung an Partei
+
+    def role_of(pid: str) -> str:
+        if pid == DSO:                 return "dso"
+        if pid == MARKET:              return "external_market"
+        if pid.startswith("HH-"):      return "household"
+        return "other"
+
+    rounded: Dict[str, float] = {}
+    for pid, amt in balances.items():
+        role = role_of(pid)
+        amt_r = _round_amt(amt, round_mode)
+        thr = min_payout_global
+        if role in ("household",): thr = max(thr, min_household)
+        if role in ("dso",):       thr = max(thr, min_dso)
+        if abs(amt_r) >= max(0.01, thr): rounded[pid] = round(amt_r, 2)
+
+    netted_payouts = dict(sorted(rounded.items(), key=lambda kv: abs(kv[1]), reverse=True))
+    netted_transaction_count = len(netted_payouts)
+
+    # Payout-Fee wie gehabt
+    fees = (policy.get("fees") or {})
+    fee_per_payout = float(fees.get("per_payout_eur") or 0.30)
+    est_fees = tx_count * fee_per_payout
+    act_fees = netted_transaction_count * fee_per_payout
+    ratio = round(tx_count / max(1, netted_transaction_count), 2)
+
+    # Für die „Before“-Spalte zeigen wir bewusst Events (künstlich), exakt wie bei Mobility
+    sample_stream = []
+    # ein paar Beispiele aus den oben gezählten Events zusammenbauen:
+    for _ in range(min(50, tx_count)):
+        sample_stream.append({"participant_id": rng.choice(HH), "amount": round(rng.uniform(0.5, 8.0),2)})
+
+    return {
+        "before": {
+            "transaction_stream": sample_stream,
+            "metrics": {
+                "total_transactions": tx_count,
+                "gross_volume_eur": None,  # bei Energy weniger aussagekräftig
+                "estimated_fees_eur": round(est_fees, 2),
+                "obligations_created": int(obligations_created),
+                "obligations_breakdown": breakdown
+            }
+        },
+        "after": {
+            "netted_payouts": netted_payouts,
+            "metrics": {
+                "netted_transactions": netted_transaction_count,
+                "actual_fees_eur": round(act_fees, 2),
+                "savings_eur": round(est_fees - act_fees, 2),
+                "compression_ratio": ratio,
+                "internal_offset_eur": round(internal_offset_eur, 2)
+            }
+        },
+        "api_proof": {
+            "request_body_snippet": { "transaction_count": tx_count, "policy_body": policy, "use_case": "energy" },
+            "response_body": { "final_net_balances": netted_payouts }
+        }
+    }
+

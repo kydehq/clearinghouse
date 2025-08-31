@@ -17,19 +17,26 @@
   </style>
 </head>
 <body class="antialiased text-gray-900">
-  <!-- Header -->
-  <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
-    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
-      <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
-      <span class="font-semibold tracking-tight">Clearinghouse PoC</span>
-      <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
-      <span class="text-sm text-gray-600 hidden md:inline">Von <strong>Chaos</strong> zu <strong>Finalität</strong> mit einem Klick</span>
-      <div class="ml-auto flex items-center gap-2">
-        <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
-        <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
-      </div>
-    </div>
-  </header>
+    <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
+        <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+          <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
+          <span class="font-semibold tracking-tight">Clearinghouse PoC</span>
+          <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
+          <span class="text-sm text-gray-600 hidden md:inline">Von <strong>Chaos</strong> zu <strong>Finalität</strong> mit einem Klick</span>
+      
+          <div class="ml-auto flex items-center gap-2">
+            <label for="usecase-switch" class="text-xs text-gray-600 hidden sm:block">Use Case</label>
+            <select id="usecase-switch" class="rounded border border-gray-300 px-2 py-1.5 text-sm">
+              <option value="mobility" selected>Mobility</option>
+              <option value="energy">Energy Community</option>
+            </select>
+      
+            <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
+            <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
+          </div>
+        </div>
+      </header>
+      
 
   <main class="mx-auto max-w-7xl p-4 md:p-6 grid grid-cols-1 gap-6">
     <!-- 0) Einstellungen & Policy -->
@@ -289,6 +296,9 @@
     const mOffset = document.querySelector("#m-offset");
     const mOblig  = document.querySelector("#m-obligations");
 
+    const usecaseSwitch = document.querySelector("#usecase-switch");
+
+
 
     // State
     let streaming=true, timerId=null, txCount=0, gross=0, estFees=0;
@@ -436,13 +446,15 @@
     async function runAutoNetting(){
       try{
         const policy = JSON.parse(taPolicy.value||"{}");
-        const body = { transaction_count: txCount, policy_body: policy };
+        const body = { transaction_count: txCount, policy_body: policy, use_case: usecaseSwitch.value };
         lastRequest = body; activeTab="req"; renderCode();
 
         const res = await fetch("/v1/poc/run-demo", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
         if(!res.ok) throw new Error("HTTP "+res.status);
         const data = await res.json();
         lastResponse = data;
+        
+
 
         showAfterLoader(false);
         renderAfter(data);
