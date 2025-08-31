@@ -202,10 +202,22 @@
         <div id="after-content" class="p-4 space-y-4 hidden">
           <div class="rounded-lg border border-gray-200 p-4 space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Anzahl Auszahlungen</div><div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
+              <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Externe Auszahlungen</div><div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
               <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Gebühren heute</div><div id="m-actual" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
               <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Ersparnis heute</div><div id="m-savings" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
             </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="rounded-lg border border-gray-200 p-3">
+                  <div class="text-xs text-gray-500">Intern verrechnet (Offset)</div>
+                  <div id="m-offset" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-3">
+                  <div class="text-xs text-gray-500">Obligationen (heute)</div>
+                  <div id="m-obligations" class="mt-1 text-2xl font-semibold tabnums">0</div>
+                </div>
+              </div>
+              
 
             <div>
               <div class="text-sm text-gray-600 mb-2">Kompression (Transaktionen → Auszahlungen)</div>
@@ -273,6 +285,10 @@
 
     const tabReq=$("#tab-req"), tabRes=$("#tab-res"), codeArea=$("#code-area"), btnCopy=$("#btn-copy"), copyDone=$("#copy-done");
     const btnRerun=$("#btn-rerun");
+
+    const mOffset = document.querySelector("#m-offset");
+    const mOblig  = document.querySelector("#m-obligations");
+
 
     // State
     let streaming=true, timerId=null, txCount=0, gross=0, estFees=0;
@@ -466,6 +482,15 @@
       if(barA) barA.style.height = afterH+"%";
       const ratio = after.metrics.compression_ratio || (beforeTx && afterTx ? (beforeTx/afterTx).toFixed(2) : "–");
       lblRatio.textContent = ratio+"×";
+
+
+      // neue KPIs
+      const obligations = resp?.before?.metrics?.obligations_created ?? 0;
+      const offsetEUR   = resp?.after?.metrics?.internal_offset_eur ?? 0;
+
+      if (mOblig)  mOblig.textContent  = String(obligations);
+      if (mOffset) mOffset.textContent = fmtEUR.format(offsetEUR);
+
 
       listPayouts.innerHTML="";
       const entries = Object.entries(after.netted_payouts)

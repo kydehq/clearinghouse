@@ -192,7 +192,7 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
       "rules": [
         {"match":{"role":"city"},          "min_payout_eur":5.00},
         {"match":{"role":"fleet_partner"}, "min_payout_eur":1.00},
-        {"match":{"role":"all"},           "round":"half_up"}  # oder "bankers"
+        {"match":{"role":"all"},           "round":"half_up"}
       ],
       "optimize": {"distribution":"uniform" | "concentrated"}
     }
@@ -201,8 +201,8 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     """
     policy = payload.policy_body or {}
 
+    # --- Inputs / Policy ---
     scenario = (policy.get("scenario") or payload.scenario or "mixed").lower()
-
     actors = policy.get("actors") or {}
     riders_n = int(actors.get("riders") or payload.riders or 400)
     # backward compat: operators -> fleet_partners
@@ -212,7 +212,7 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     splits = policy.get("splits") or {}
     # backward compat: operator_share -> fleet_share
     fleet_share = float(splits.get("fleet_share") or splits.get("operator_share") or 0.90)
-    city_share = float(splits.get("city_share") or 0.10)
+    city_share  = float(splits.get("city_share") or 0.10)
 
     fees = policy.get("fees") or {}
     fee_per_payout = float(fees.get("per_payout_eur") or payload.fee_per_transaction_eur or 0.30)
@@ -237,11 +237,11 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     optimize = policy.get("optimize") or {}
     distribution = (optimize.get("distribution") or "uniform").lower()
 
-    # Simulation (deterministisch)
+    # --- Helpers ---
     rng = random.Random(42)
     riders = [f"Rider-{i:04d}" for i in range(1, max(1, riders_n) + 1)]
-    fleet = [f"Fleet-{i+1}" for i in range(max(1, fleet_n))]
-    cities = [f"City-{i+1}" for i in range(max(1, cities_n))]
+    fleet  = [f"Fleet-{i+1}" for i in range(max(1, fleet_n))]
+    cities = [f"City-{i+1}"  for i in range(max(1, cities_n))]
 
     def pick_weighted(lst: List[str], k_weight: float = 0.8) -> str:
         if len(lst) <= 1: return lst[0]
@@ -251,24 +251,30 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
                 return lst[rng.randrange(top)]
         return lst[rng.randrange(len(lst))]
 
-    gross_volume = 0.0
-    raw_transactions: List[Dict[str, Any]] = []
-    # balances: negative = Empfänger erhält Geld von Bolt
-    balances: Dict[str, float] = defaultdict(float)
-
-    def _fare_for(mode: str, rng: random.Random) -> float:
-        if mode == "car": return round(rng.uniform(8.0, 30.0), 2)
-        if mode == "scooter": return round(rng.uniform(1.0, 5.0), 2)
-        roll = rng.random()
-        if roll < 0.6: return round(rng.uniform(1.0, 5.0), 2)      # scooter
-        if roll < 0.9: return round(rng.uniform(8.0, 30.0), 2)     # car
-        return round(rng.uniform(0.5, 3.0), 2)                      # sonstige
+    def _fare_for(mode: str, r: random.Random) -> float:
+        if mode == "car":     return round(r.uniform(8.0, 30.0), 2)
+        if mode == "scooter": return round(r.uniform(1.0, 5.0), 2)
+        roll = r.random()
+        if roll < 0.6: return round(r.uniform(1.0, 5.0), 2)      # scooter
+        if roll < 0.9: return round(r.uniform(8.0, 30.0), 2)     # car
+        return round(r.uniform(0.5, 3.0), 2)                      # misc
 
     def _round_amt(x: float, mode: str) -> float:
         d = Decimal(str(x))
         if mode == "bankers":
             return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
         return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    # --- Simulation: Events -> Obligations ---
+    gross_volume = 0.0
+    raw_transactions: List[Dict[str, Any]] = []
+
+    # Wir trennen Verpflichtungen:
+    # - operator_owes_party[pid]  = Operator zahlt an Partei (Fleet/City)  (EUR, +)
+    # - party_owes_operator[pid]  = Partei zahlt an Operator (z.B. Penalty) (EUR, +)
+    operator_owes_party: Dict[str, float] = defaultdict(float)
+    party_owes_operator: Dict[str, float] = defaultdict(float)
+    obligations_created = 0
 
     for _ in range(max(1, payload.transaction_count)):
         rider = rng.choice(riders)
@@ -279,12 +285,33 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         fp = pick_weighted(fleet)
         ct = pick_weighted(cities)
 
-        balances[fp] += -fare * fleet_share
-        balances[ct] += -fare * city_share
+        # Umsatz-Splits erzeugen je Ride
+        operator_owes_party[fp] += fare * fleet_share; obligations_created += 1
+        operator_owes_party[ct] += fare * city_share;  obligations_created += 1
 
-    # Runden & Schwellen nach Rolle
+        # Ein kleiner Teil der Rides erzeugt Gegenflüsse (z.B. Strafgebühr/Adjustments),
+        # die an den Operator zurückfließen -> interne Verrechnung möglich
+        if rng.random() < 0.12:
+            penalty = round(rng.uniform(0.5, 3.0), 2)
+            party_owes_operator[fp] += penalty
+            obligations_created += 1
+
+    # --- Interner Offset & Nettobeträge je Partei ---
+    # Internal offset = Summe der min(Operator->Partei, Partei->Operator) je Partei (vor Runden/Thresholds)
+    internal_offset_eur = 0.0
+    balances: Dict[str, float] = {}  # negativ = Auszahlung an Partei, positiv = Einzug von Partei
+
+    all_parties = set(operator_owes_party.keys()) | set(party_owes_operator.keys())
+    for pid in all_parties:
+        to_party = operator_owes_party.get(pid, 0.0)
+        to_op    = party_owes_operator.get(pid, 0.0)
+        internal_offset_eur += min(to_party, to_op)
+        net = to_party - to_op
+        balances[pid] = -net  # negativ = Operator zahlt an Partei
+
+    # --- Runden & Schwellen nach Rolle ---
     def role_of(pid: str) -> str:
-        if pid.startswith("City-"): return "city"
+        if pid.startswith("City-"):  return "city"
         if pid.startswith("Fleet-"): return "fleet_partner"
         return "other"
 
@@ -293,18 +320,18 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         role = role_of(pid)
         amt_r = _round_amt(amt, round_mode)
         thr = min_payout_global
-        if role == "city": thr = max(thr, min_city)
+        if role == "city":          thr = max(thr, min_city)
         if role == "fleet_partner": thr = max(thr, min_fleet)
         if abs(amt_r) < thr:
             amt_r = 0.0
         if abs(amt_r) >= 0.01:
-            rounded[pid] = amt_r
+            rounded[pid] = round(amt_r, 2)
 
-    netted_payouts = {pid: round(val, 2) for pid, val in rounded.items()}
+    netted_payouts = dict(sorted(rounded.items(), key=lambda kv: abs(kv[1]), reverse=True))
     netted_transaction_count = len(netted_payouts)
 
     estimated_fees = payload.transaction_count * fee_per_payout
-    actual_fees = netted_transaction_count * fee_per_payout
+    actual_fees    = netted_transaction_count * fee_per_payout
     compression_ratio = round(payload.transaction_count / max(1, netted_transaction_count), 2)
 
     return {
@@ -313,7 +340,8 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
             "metrics": {
                 "total_transactions": payload.transaction_count,
                 "gross_volume_eur": round(gross_volume, 2),
-                "estimated_fees_eur": round(estimated_fees, 2)
+                "estimated_fees_eur": round(estimated_fees, 2),
+                "obligations_created": int(obligations_created)
             }
         },
         "after": {
@@ -322,7 +350,8 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
                 "netted_transactions": netted_transaction_count,
                 "actual_fees_eur": round(actual_fees, 2),
                 "savings_eur": round(estimated_fees - actual_fees, 2),
-                "compression_ratio": compression_ratio
+                "compression_ratio": compression_ratio,
+                "internal_offset_eur": round(internal_offset_eur, 2)
             }
         },
         "api_proof": {
@@ -333,5 +362,3 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
             "response_body": { "final_net_balances": netted_payouts }
         }
     }
-
-
