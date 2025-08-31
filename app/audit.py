@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .models import SettlementBatch, SettlementLine, UsageEvent, Participant
-from .utils.crypto import create_transaction_hash
+from app.utils.crypto import create_transaction_hash  # ABSOLUTE IMPORT
 
 def human_readable_explanation(participant, events: List[UsageEvent], final_amount: float, use_case: str) -> str:
     role_names = {

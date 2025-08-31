@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from .models import UsageEvent, SettlementBatch, SettlementLine
-from .utils.crypto import create_transaction_hash
+from app.utils.crypto import create_transaction_hash  # ABSOLUTE IMPORT
 
 # balances = { pid: {"credit": float, "debit": float} }
 # final_net = { pid: float }  # >0 = zahlt, <0 = erhält
@@ -27,7 +27,6 @@ def apply_bilateral_netting(
     debtors: List[Tuple[int, float]] = [(pid, amt) for pid, amt in final_net.items() if amt > 0.0001]
     creditors: List[Tuple[int, float]] = [(pid, -amt) for pid, amt in final_net.items() if amt < -0.0001]
 
-    # deterministisch
     debtors.sort(key=lambda x: (x[1], x[0]), reverse=True)
     creditors.sort(key=lambda x: (x[1], x[0]), reverse=True)
 
@@ -104,16 +103,12 @@ def apply_policy_and_settle(
             amount = qty if unit == "eur" else qty * price
             add_credit(ev.participant_id, amount)
 
-        # battery_charge/discharge/production sind hier neutral
-
     final_net, stats, transfers = apply_bilateral_netting(balances, policy_body)
 
-    # Optional: Min-Payout-Threshold aus policy
     threshold = float((policy_body or {}).get("min_payout_eur", 0.0))
     if threshold > 0:
         final_net = {pid: (amt if abs(amt) >= threshold else 0.0) for pid, amt in final_net.items()}
 
-    # Batch
     batch = SettlementBatch(
         use_case=use_case,
         start_time=start_time,
@@ -122,7 +117,6 @@ def apply_policy_and_settle(
     db.add(batch)
     db.flush()
 
-    # Lines
     result_data: Dict[int, Dict[str, float]] = {}
     description = f"Settlement {use_case} {start_time.isoformat()} – {end_time.isoformat()}"
     for pid, amount in final_net.items():
