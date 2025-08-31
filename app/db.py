@@ -58,39 +58,39 @@ def _column_exists(conn, table: str, column: str) -> bool:
 def _add_json_column_if_missing(conn, table: str, column: str):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} JSON"))
-    conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+        conn.execute(text(f"UPDATE {table} SET {column} = '{{}}'::json WHERE {column} IS NULL"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{{}}'::json"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _add_timestamptz_column_if_missing(conn, table: str, column: str):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} TIMESTAMPTZ"))
-    conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+        conn.execute(text(f"UPDATE {table} SET {column} = NOW() WHERE {column} IS NULL"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT NOW()"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _add_float_column_if_missing(conn, table: str, column: str, default: float = 0.0):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE PRECISION"))
-    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+        conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _add_integer_column_if_missing(conn, table: str, column: str, default: int = 0):
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER"))
-    conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+        conn.execute(text(f"UPDATE {table} SET {column} = {default} WHERE {column} IS NULL"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default}"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _add_varchar_column_if_missing(conn, table: str, column: str, default: str = ""):
     """Generisch für NICHT-UNIQUE Felder. Für participants.external_id NICHT benutzen!"""
     if not _column_exists(conn, table, column):
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} VARCHAR"))
-    lit = default.replace("'", "''")
-    conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
-    conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
+        lit = default.replace("'", "''")
+        conn.execute(text(f"UPDATE {table} SET {column} = '{lit}' WHERE {column} IS NULL"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT '{lit}'"))
+        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _ensure_participants_external_id(conn):
     """
@@ -98,23 +98,18 @@ def _ensure_participants_external_id(conn):
     - Spalte anlegen falls fehlt
     - NULL oder '' auf eindeutiges 'migrated-{id}' setzen
     - NOT NULL setzen
-    - KEIN zusätzlicher Unique-Index (wir gehen von bestehendem aus)
     """
     if not _column_exists(conn, "participants", "external_id"):
         conn.execute(text("ALTER TABLE participants ADD COLUMN external_id VARCHAR"))
 
-    # Eindeutig backfillen (vermeidet Kollision mit Unique-Index)
+    # Eindeutig backfillen (vermeidet Kollision)
     conn.execute(text("""
-        UPDATE participants
-        SET external_id = 'migrated-' || id
-        WHERE external_id IS NULL OR external_id = ''
+    UPDATE participants
+    SET external_id = 'migrated-' || id
+    WHERE external_id IS NULL OR external_id = ''
     """))
 
-    # Not Null erst NACH Backfill
     conn.execute(text("ALTER TABLE participants ALTER COLUMN external_id SET NOT NULL"))
-
-    # Falls du unbedingt einen Index sicherstellen willst, mach das manuell per SQL außerhalb.
-    # Hier kein automatisches CREATE UNIQUE INDEX, um Doppel-Indexes zu vermeiden.
 
 def ensure_min_schema():
     """Enums/Tables/Spalten sicherstellen + Werte normalisieren."""
@@ -139,20 +134,24 @@ def ensure_min_schema():
 
         # participants
         _add_varchar_column_if_missing(conn, "participants", "name", "")
-        # external_id: eigene Routine (kein ''-Backfill!)
         _ensure_participants_external_id(conn)
-        # HINWEIS: keinen zusätzlichen Unique-Index hier erzeugen
+
+        # participants.role sicherstellen
+        if not _column_exists(conn, "participants", "role"):
+            conn.execute(text("ALTER TABLE participants ADD COLUMN role participantrole"))
+            conn.execute(text("UPDATE participants SET role = 'consumer'::participantrole WHERE role IS NULL"))
+            conn.execute(text("ALTER TABLE participants ALTER COLUMN role SET NOT NULL"))
 
         # usage_events
         _add_integer_column_if_missing(conn, "usage_events", "participant_id", 0)
         if not _column_exists(conn, "usage_events", "meta"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN meta JSON"))
-        conn.execute(text("ALTER TABLE usage_events ALTER COLUMN meta SET DEFAULT '{}'::json"))
+            conn.execute(text("ALTER TABLE usage_events ALTER COLUMN meta SET DEFAULT '{}'::json"))
         # event_type als Enum sicherstellen
         if not _column_exists(conn, "usage_events", "event_type"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN event_type eventtype"))
             conn.execute(text("UPDATE usage_events SET event_type = 'consumption'::eventtype WHERE event_type IS NULL"))
-        conn.execute(text("ALTER TABLE usage_events ALTER COLUMN event_type SET NOT NULL"))
+            conn.execute(text("ALTER TABLE usage_events ALTER COLUMN event_type SET NOT NULL"))
         _add_float_column_if_missing(conn, "usage_events", "quantity", 0.0)
         _add_varchar_column_if_missing(conn, "usage_events", "unit", "kWh")
         _add_timestamptz_column_if_missing(conn, "usage_events", "timestamp")
@@ -184,12 +183,12 @@ def ensure_min_schema():
 
         # ---- Daten normalisieren (wichtiger Teil) ----
         conn.execute(text("""
-            UPDATE participants
-            SET role = LOWER(role::text)::participantrole
-            WHERE role::text <> LOWER(role::text)
+        UPDATE participants
+        SET role = LOWER(role::text)::participantrole
+        WHERE role::text <> LOWER(role::text)
         """))
         conn.execute(text("""
-            UPDATE usage_events
-            SET event_type = LOWER(event_type::text)::eventtype
-            WHERE event_type::text <> LOWER(event_type::text)
+        UPDATE usage_events
+        SET event_type = LOWER(event_type::text)::eventtype
+        WHERE event_type::text <> LOWER(event_type::text)
         """))

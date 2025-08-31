@@ -1,10 +1,13 @@
+from __future__ import annotations
 from collections import defaultdict
+from typing import List
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from .models import SettlementBatch, SettlementLine, UsageEvent, Participant
-from .settle import create_transaction_hash
 
-def human_readable_explanation(participant, events, final_amount, use_case: str) -> str:
+from .models import SettlementBatch, SettlementLine, UsageEvent, Participant
+
+# Menschenlesbare Erklärung je Teilnehmer
+def human_readable_explanation(participant, events: List[UsageEvent], final_amount: float, use_case: str) -> str:
     role_names = {
         "tenant": "Mieter", "commercial": "Gewerbemieter", "landlord": "Vermieter",
         "operator": "Betreiber", "external_market": "Externer Markt", "prosumer": "Prosumer",
@@ -15,24 +18,31 @@ def human_readable_explanation(participant, events, final_amount, use_case: str)
     if not events:
         return f"{participant.name} ({role}) hat keine Events. Finalbetrag: {final_amount:.2f} EUR"
 
-    consumption_local = sum(e.quantity for e in events if e.event_type.value == "consumption" and (e.meta or {}).get("source", "").lower() in ["local_pv", "battery", "local_battery"])
-    consumption_grid = sum(e.quantity for e in events if e.event_type.value == "consumption" and (e.meta or {}).get("source", "").lower() not in ["local_pv", "battery", "local_battery"])
+    consumption_local = sum(e.quantity for e in events
+                            if e.event_type.value == "consumption"
+                            and (e.meta or {}).get("source", "").lower() in ["local_pv", "battery", "local_battery"])
+    consumption_grid = sum(e.quantity for e in events
+                           if e.event_type.value == "consumption"
+                           and (e.meta or {}).get("source", "").lower() not in ["local_pv", "battery", "local_battery"])
     generation = sum(e.quantity for e in events if e.event_type.value in ["generation", "grid_feed"])
     base_fee_total = sum(e.quantity for e in events if e.event_type.value == "base_fee")
 
     parts = []
     if consumption_local > 0: parts.append(f"{consumption_local:.1f} kWh lokaler Strom")
-    if consumption_grid > 0:  parts.append(f"{consumption_grid:.1f} kWh Netzstrom")
-    if generation > 0:        parts.append(f"{generation:.1f} kWh erzeugt/eingespeist")
-    if base_fee_total > 0:    parts.append(f"{base_fee_total:.2f} EUR Grundgebühr")
+    if consumption_grid > 0: parts.append(f"{consumption_grid:.1f} kWh Netzstrom")
+    if generation > 0: parts.append(f"{generation:.1f} kWh erzeugt/eingespeist")
+    if base_fee_total > 0: parts.append(f"{base_fee_total:.2f} EUR Grundgebühr")
 
     summary = f"{participant.name} ({role}): " + (", ".join(parts) + ". " if parts else "Keine relevanten Aktivitäten. ")
-    if final_amount > 0:   summary += f"Zahlt {final_amount:.2f} EUR."
+    if final_amount > 0: summary += f"Zahlt {final_amount:.2f} EUR."
     elif final_amount < 0: summary += f"Erhält {abs(final_amount):.2f} EUR."
-    else:                  summary += "Ausgeglichen (0 EUR)."
+    else: summary += "Ausgeglichen (0 EUR)."
     return summary
 
 def get_audit_payload(db: Session, batch_id: int, explain: bool = False):
+    # Lazy import vermeidet Zyklen
+    from .utils.crypto import create_transaction_hash
+
     batch = db.query(SettlementBatch).filter(SettlementBatch.id == batch_id).first()
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")

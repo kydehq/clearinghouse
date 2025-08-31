@@ -1,7 +1,6 @@
-# FIX: Fehlende Imports hinzugefügt
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 import random
@@ -11,7 +10,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-
 from sqlalchemy.orm import Session
 
 from .db import ensure_min_schema, get_db
@@ -40,14 +38,14 @@ class EventPayload(BaseModel):
 
 class NettingPreviewPayload(BaseModel):
     use_case: str
-    policy_body: dict
+    policy_body: Dict[str, Any]
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     community_id: Optional[str] = None
 
 class SettlePayload(BaseModel):
     use_case: str
-    policy_body: dict
+    policy_body: Dict[str, Any]
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     community_id: Optional[str] = None
@@ -65,10 +63,9 @@ def index(request: Request):
 @app.get("/demo/api-dashboard", response_class=HTMLResponse)
 def get_api_dashboard(request: Request):
     return templates.TemplateResponse("api_dashboard.html", {"request": request})
-    
+
 @app.get("/demo/poc-dashboard", response_class=HTMLResponse)
 def get_poc_dashboard(request: Request):
-    # Route für das neue Dashboard
     return templates.TemplateResponse("poc_dashboard.html", {"request": request})
 
 # ---------- API ----------
@@ -116,21 +113,26 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
     try:
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
+
         events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
+
         ids = [e.participant_id for e in events]
         participants = {p.id: p for p in db.query(Participant).filter(Participant.id.in_(ids)).all()}
+
         balances = defaultdict(lambda: {"credit": 0.0, "debit": 0.0})
         for ev in events:
             p = participants.get(ev.participant_id)
-            if not p: continue
+            if not p:
+                continue
             qty = float(ev.quantity or 0.0)
             price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
             if ev.event_type.value in ("consumption", "base_fee"):
                 balances[p.id]["debit"] += qty * price
             elif ev.event_type.value in ("generation", "grid_feed", "vpp_sale"):
                 balances[p.id]["credit"] += qty * price
+
         final_balances, stats, transfers = apply_bilateral_netting(balances, payload.policy_body)
         content = {
             "stats": stats,
@@ -150,14 +152,17 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
     try:
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
+
         events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found to settle."})
+
         batch, result_data, _ = apply_policy_and_settle(
             db, payload.use_case, payload.policy_body, events, start_time=start, end_time=end
         )
         pid_map = {p.id: p for p in db.query(Participant).filter(Participant.id.in_(result_data.keys())).all()}
         final_net = {pid_map[i].external_id: round(d["final_net"], 2) for i, d in result_data.items()}
+
         return JSONResponse(content={
             "status": "success",
             "batch_id": batch.id,
@@ -179,15 +184,13 @@ def audit_batch(batch_id: int, explain: bool = False, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---------- Neuer PoC-Endpunkt ----------
-
-# FIX: Fehlende Helper-Funktion hinzugefügt
 def generate_dummy_escooter_events(count: int) -> list[dict]:
     participants = ["Alice", "Bob", "Clara", "Operator-X", "City-Y", "Provider-Z"]
     events = []
     for _ in range(count):
         p = random.choice(participants)
         amount = round(random.uniform(0.5, 5.0), 2)
-        # Sorge dafür, dass Betreiber und Städte eher Geld erhalten
+        # Betreiber/Stadt/Provider eher Auszahlung
         if "Operator" in p or "City" in p or "Provider" in p:
             amount = -amount
         events.append({"participant_id": p, "amount": amount})
@@ -200,13 +203,14 @@ class PocDemoPayload(BaseModel):
 @app.post("/v1/poc/run-demo")
 def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     raw_transactions = generate_dummy_escooter_events(payload.transaction_count)
+
     gross_volume = sum(abs(t['amount']) for t in raw_transactions)
     estimated_fees = payload.transaction_count * payload.fee_per_transaction_eur
-    
+
     balances = defaultdict(float)
     for t in raw_transactions:
         balances[t['participant_id']] += t['amount']
-    
+
     netted_payouts = {pid: round(amount, 2) for pid, amount in balances.items() if abs(amount) > 0.01}
     netted_transaction_count = len(netted_payouts)
     actual_fees = netted_transaction_count * payload.fee_per_transaction_eur
@@ -222,7 +226,7 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         },
         "after": {
             "netted_payouts": netted_payouts,
-             "metrics": {
+            "metrics": {
                 "netted_transactions": netted_transaction_count,
                 "actual_fees_eur": round(actual_fees, 2),
                 "savings_eur": round(estimated_fees - actual_fees, 2)
@@ -230,6 +234,6 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         },
         "api_proof": {
             "request_body_snippet": {"events": raw_transactions[:2]},
-            "response_body": {"batch_id": random.randint(100,200), "final_net_balances": netted_payouts}
+            "response_body": {"batch_id": random.randint(100, 200), "final_net_balances": netted_payouts}
         }
     }

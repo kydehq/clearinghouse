@@ -1,234 +1,127 @@
-# FIX: Fehlende Imports hinzugefügt
 from __future__ import annotations
-from pathlib import Path
-from typing import List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Tuple, List, Any
 from collections import defaultdict
-import random
-
-from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from .db import ensure_min_schema, get_db
-from .models import Participant, ParticipantRole, UsageEvent, EventType
-from .audit import get_audit_payload
+from .models import UsageEvent, SettlementBatch, SettlementLine
+from .utils.crypto import create_transaction_hash
 
-# ---------- App / Templates ----------
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR.parent / "static"
+# Typen:
+# balances = { pid: {"credit": float, "debit": float} }
+# final_balances = { pid: float }  # >0 = zahlt (debit - credit), <0 = erhält
 
-app = FastAPI(title="KYDE PoC", debug=True)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+def _compute_final_balances(balances: Dict[int, Dict[str, float]]) -> Dict[int, float]:
+    final_net: Dict[int, float] = {}
+    for pid, bd in balances.items():
+        debit = float(bd.get("debit", 0.0))
+        credit = float(bd.get("credit", 0.0))
+        final_net[pid] = round(debit - credit, 10)  # positiv = zahlt
+    return final_net
 
-# ---------- Pydantic Schemas ----------
-class EventPayload(BaseModel):
-    participant_id: str
-    event_type: EventType
-    quantity: float
-    unit: str
-    timestamp: datetime
-    source: str
-    price_eur_per_kwh: Optional[float] = 0.0
+def apply_bilateral_netting(
+    balances: Dict[int, Dict[str, float]],
+    policy_body: Dict[str, Any] | None = None
+) -> Tuple[Dict[int, float], Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Simpler bilateraler Netting-Algorithmus:
+    - final_net = debit - credit
+    - Schuldner (final_net>0) zahlen Gläubiger (final_net<0) im Greedy-Verfahren aus.
+    """
+    final_net = _compute_final_balances(balances)
+    debtors: List[Tuple[int, float]] = [(pid, amt) for pid, amt in final_net.items() if amt > 0.0001]
+    creditors: List[Tuple[int, float]] = [(pid, -amt) for pid, amt in final_net.items() if amt < -0.0001]
 
-class NettingPreviewPayload(BaseModel):
-    use_case: str
-    policy_body: dict
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    community_id: Optional[str] = None
+    debtors.sort(key=lambda x: x[1], reverse=True)     # große Schulden zuerst
+    creditors.sort(key=lambda x: x[1], reverse=True)   # große Forderungen zuerst
 
-class SettlePayload(BaseModel):
-    use_case: str
-    policy_body: dict
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    community_id: Optional[str] = None
+    transfers: List[Dict[str, Any]] = []
+    i, j = 0, 0
+    while i < len(debtors) and j < len(creditors):
+        d_pid, d_amt = debtors[i]
+        c_pid, c_amt = creditors[j]
+        pay = min(d_amt, c_amt)
 
-# ---------- Startup ----------
-@app.on_event("startup")
-def on_startup():
-    ensure_min_schema()
+        transfers.append({"from": d_pid, "to": c_pid, "amount_eur": round(pay, 2)})
 
-# ---------- Routes (HTML) ----------
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+        d_amt -= pay
+        c_amt -= pay
+        debtors[i] = (d_pid, d_amt)
+        creditors[j] = (c_pid, c_amt)
 
-@app.get("/demo/api-dashboard", response_class=HTMLResponse)
-def get_api_dashboard(request: Request):
-    return templates.TemplateResponse("api_dashboard.html", {"request": request})
-    
-@app.get("/demo/poc-dashboard", response_class=HTMLResponse)
-def get_poc_dashboard(request: Request):
-    # Route für das neue Dashboard
-    return templates.TemplateResponse("poc_dashboard.html", {"request": request})
+        if d_amt <= 0.0001:
+            i += 1
+        if c_amt <= 0.0001:
+            j += 1
 
-# ---------- API ----------
-@app.post("/v1/energy-events", status_code=201)
-def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_db)):
-    try:
-        existing = {p.external_id: p for p in db.query(Participant).all()}
-        new_participants = []
-
-        for ev in events:
-            ext_id = ev.participant_id
-            if ext_id not in existing:
-                p = Participant(
-                    external_id=ext_id,
-                    name=f"Participant {ext_id}",
-                    role=ParticipantRole.prosumer
-                )
-                db.add(p)
-                new_participants.append(p)
-                existing[ext_id] = p
-
-        if new_participants:
-            db.flush()
-
-        rows: list[UsageEvent] = []
-        for ev in events:
-            p = existing[ev.participant_id]
-            rows.append(UsageEvent(
-                participant_id=p.id,
-                event_type=ev.event_type,
-                quantity=ev.quantity,
-                unit=ev.unit,
-                timestamp=ev.timestamp,
-                meta={"source": ev.source, "price_eur_per_kwh": ev.price_eur_per_kwh or 0.0}
-            ))
-        db.add_all(rows)
-        db.commit()
-        return {"status": "success", "message": f"Ingested {len(rows)} events."}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/v1/netting/preview", response_class=JSONResponse)
-def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db)):
-    try:
-        start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
-        end = payload.end_time or datetime.utcnow()
-        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
-        if not events:
-            return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
-        ids = [e.participant_id for e in events]
-        participants = {p.id: p for p in db.query(Participant).filter(Participant.id.in_(ids)).all()}
-        balances = defaultdict(lambda: {"credit": 0.0, "debit": 0.0})
-        for ev in events:
-            p = participants.get(ev.participant_id)
-            if not p: continue
-            qty = float(ev.quantity or 0.0)
-            price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
-            if ev.event_type.value in ("consumption", "base_fee"):
-                balances[p.id]["debit"] += qty * price
-            elif ev.event_type.value in ("generation", "grid_feed", "vpp_sale"):
-                balances[p.id]["credit"] += qty * price
-        final_balances, stats, transfers = apply_bilateral_netting(balances, payload.policy_body)
-        content = {
-            "stats": stats,
-            "transfers": transfers,
-            "final_balances": {
-                participants[pid].external_id: round(val, 2)
-                for pid, val in final_balances.items() if abs(val) > 0.01
-            }
-        }
-        return JSONResponse(content=content)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/v1/settle/execute", response_class=JSONResponse)
-def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
-    try:
-        start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
-        end = payload.end_time or datetime.utcnow()
-        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
-        if not events:
-            return JSONResponse(status_code=200, content={"message": "No events found to settle."})
-        batch, result_data, _ = apply_policy_and_settle(
-            db, payload.use_case, payload.policy_body, events, start_time=start, end_time=end
-        )
-        pid_map = {p.id: p for p in db.query(Participant).filter(Participant.id.in_(result_data.keys())).all()}
-        final_net = {pid_map[i].external_id: round(d["final_net"], 2) for i, d in result_data.items()}
-        return JSONResponse(content={
-            "status": "success",
-            "batch_id": batch.id,
-            "message": "Settlement executed and proofs generated.",
-            "final_net_balances": final_net
-        })
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
-def audit_batch(batch_id: int, explain: bool = False, db: Session = Depends(get_db)):
-    try:
-        return JSONResponse(content=get_audit_payload(db, batch_id, explain))
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ---------- Neuer PoC-Endpunkt ----------
-
-# FIX: Fehlende Helper-Funktion hinzugefügt
-def generate_dummy_escooter_events(count: int) -> list[dict]:
-    participants = ["Alice", "Bob", "Clara", "Operator-X", "City-Y", "Provider-Z"]
-    events = []
-    for _ in range(count):
-        p = random.choice(participants)
-        amount = round(random.uniform(0.5, 5.0), 2)
-        # Sorge dafür, dass Betreiber und Städte eher Geld erhalten
-        if "Operator" in p or "City" in p or "Provider" in p:
-            amount = -amount
-        events.append({"participant_id": p, "amount": amount})
-    return events
-
-class PocDemoPayload(BaseModel):
-    transaction_count: int = 500
-    fee_per_transaction_eur: float = 0.30
-
-@app.post("/v1/poc/run-demo")
-def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
-    raw_transactions = generate_dummy_escooter_events(payload.transaction_count)
-    gross_volume = sum(abs(t['amount']) for t in raw_transactions)
-    estimated_fees = payload.transaction_count * payload.fee_per_transaction_eur
-    
-    balances = defaultdict(float)
-    for t in raw_transactions:
-        balances[t['participant_id']] += t['amount']
-    
-    netted_payouts = {pid: round(amount, 2) for pid, amount in balances.items() if abs(amount) > 0.01}
-    netted_transaction_count = len(netted_payouts)
-    actual_fees = netted_transaction_count * payload.fee_per_transaction_eur
-
-    return {
-        "before": {
-            "transaction_stream": raw_transactions[:20],
-            "metrics": {
-                "total_transactions": payload.transaction_count,
-                "gross_volume_eur": round(gross_volume, 2),
-                "estimated_fees_eur": round(estimated_fees, 2)
-            }
-        },
-        "after": {
-            "netted_payouts": netted_payouts,
-             "metrics": {
-                "netted_transactions": netted_transaction_count,
-                "actual_fees_eur": round(actual_fees, 2),
-                "savings_eur": round(estimated_fees - actual_fees, 2)
-            }
-        },
-        "api_proof": {
-            "request_body_snippet": {"events": raw_transactions[:2]},
-            "response_body": {"batch_id": random.randint(100,200), "final_net_balances": netted_payouts}
-        }
+    stats = {
+        "participants": len(final_net),
+        "debtors": len([1 for v in final_net.values() if v > 0.0001]),
+        "creditors": len([1 for v in final_net.values() if v < -0.0001]),
+        "total_owed_eur": round(sum(v for v in final_net.values() if v > 0), 2),
+        "total_due_eur": round(sum(-v for v in final_net.values() if v < 0), 2),
+        "transfer_count": len(transfers),
     }
+
+    return final_net, stats, transfers
+
+def apply_policy_and_settle(
+    db: Session,
+    use_case: str,
+    policy_body: Dict[str, Any],
+    events: List[UsageEvent],
+    start_time: datetime,
+    end_time: datetime
+):
+    """
+    Erzeugt einen SettlementBatch + SettlementLines basierend auf Events.
+    pricing: aus event.meta["price_eur_per_kwh"], debit für consumption/base_fee, credit für generation/grid_feed/vpp_sale
+    """
+    # 1) Salden aus Events aufbauen
+    balances: Dict[int, Dict[str, float]] = defaultdict(lambda: {"credit": 0.0, "debit": 0.0})
+    for ev in events:
+        price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
+        qty = float(ev.quantity or 0.0)
+        if ev.event_type.value in ("consumption", "base_fee"):
+            balances[ev.participant_id]["debit"] += qty * price
+        elif ev.event_type.value in ("generation", "grid_feed", "vpp_sale"):
+            balances[ev.participant_id]["credit"] += qty * price
+        else:
+            # andere Typen sind für Abrechnung neutral
+            pass
+
+    final_net, stats, transfers = apply_bilateral_netting(balances, policy_body)
+
+    # 2) Batch anlegen
+    batch = SettlementBatch(
+        use_case=use_case,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    db.add(batch)
+    db.flush()  # batch.id erhalten
+
+    # 3) Lines erzeugen
+    result_data: Dict[int, Dict[str, float]] = {}
+    description = f"Settlement {use_case} {start_time.isoformat()} – {end_time.isoformat()}"
+    for pid, amount in final_net.items():
+        base = {
+            "batch_id": batch.id,
+            "participant_id": pid,
+            "amount_eur": round(float(amount), 2),
+            "description": description,
+        }
+        proof = create_transaction_hash(base)
+        line = SettlementLine(
+            batch_id=batch.id,
+            participant_id=pid,
+            amount_eur=base["amount_eur"],
+            description=description,
+            proof_hash=proof,
+        )
+        db.add(line)
+        result_data[pid] = {"final_net": float(amount)}
+
+    db.commit()
+    return batch, result_data, transfers
