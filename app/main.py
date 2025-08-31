@@ -181,32 +181,37 @@ def _fare_for(mode: str, rng: random.Random) -> float:
 @app.post("/v1/poc/run-demo")
 def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     """
-    Policy-DSL (vereinfachtes Beispielformat):
+    Policy-DSL (vereinfacht):
 
     {
       "scenario": "mixed" | "scooter" | "car",
       "fees": {"per_payout_eur": 0.30},
-      "actors": {"riders": 400, "operators": 20, "cities": 10},
-      "splits": {"operator_share": 0.90, "city_share": 0.10},
+      "actors": {"riders": 400, "fleet_partners": 20, "cities": 10},
+      "splits": {"fleet_share": 0.90, "city_share": 0.10},
       "thresholds": {"min_payout_eur": 1.00},
       "rules": [
-        {"match":{"role":"city"}, "min_payout_eur":5.00},
-        {"match":{"role":"operator"}, "min_payout_eur":1.00},
-        {"match":{"role":"all"}, "round":"half_up"}  # oder "bankers"
+        {"match":{"role":"city"},          "min_payout_eur":5.00},
+        {"match":{"role":"fleet_partner"}, "min_payout_eur":1.00},
+        {"match":{"role":"all"},           "round":"half_up"}  # oder "bankers"
       ],
       "optimize": {"distribution":"uniform" | "concentrated"}
     }
+
+    Hinweis: Abwärtskompatibel zu "operators"/"operator_share".
     """
     policy = payload.policy_body or {}
 
     scenario = (policy.get("scenario") or payload.scenario or "mixed").lower()
+
     actors = policy.get("actors") or {}
     riders_n = int(actors.get("riders") or payload.riders or 400)
-    ops_n = int(actors.get("operators") or payload.operators or 20)
+    # backward compat: operators -> fleet_partners
+    fleet_n = int(actors.get("fleet_partners") or actors.get("operators") or payload.operators or 20)
     cities_n = int(actors.get("cities") or payload.cities or 10)
 
     splits = policy.get("splits") or {}
-    operator_share = float(splits.get("operator_share") or 0.90)
+    # backward compat: operator_share -> fleet_share
+    fleet_share = float(splits.get("fleet_share") or splits.get("operator_share") or 0.90)
     city_share = float(splits.get("city_share") or 0.10)
 
     fees = policy.get("fees") or {}
@@ -215,30 +220,29 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     thresholds = policy.get("thresholds") or {}
     min_payout_global = float(thresholds.get("min_payout_eur") or 0.0)
 
-    # rules
     rules = policy.get("rules") or []
     round_mode = "half_up"
     min_city = min_payout_global
-    min_op = min_payout_global
+    min_fleet = min_payout_global
     for r in rules:
         m = (r.get("match") or {})
         if m.get("role") == "all" and r.get("round"):
             round_mode = r["round"]
         if m.get("role") == "city" and r.get("min_payout_eur") is not None:
             min_city = float(r["min_payout_eur"])
-        if m.get("role") == "operator" and r.get("min_payout_eur") is not None:
-            min_op = float(r["min_payout_eur"])
+        # backward compat: operator -> fleet_partner
+        if m.get("role") in ("fleet_partner", "operator") and r.get("min_payout_eur") is not None:
+            min_fleet = float(r["min_payout_eur"])
 
     optimize = policy.get("optimize") or {}
     distribution = (optimize.get("distribution") or "uniform").lower()
 
-    # Simulation (deterministisch reproduzierbar)
+    # Simulation (deterministisch)
     rng = random.Random(42)
     riders = [f"Rider-{i:04d}" for i in range(1, max(1, riders_n) + 1)]
-    operators = [f"Operator-{i+1}" for i in range(max(1, ops_n))]
+    fleet = [f"Fleet-{i+1}" for i in range(max(1, fleet_n))]
     cities = [f"City-{i+1}" for i in range(max(1, cities_n))]
 
-    # Gewichtete Auswahl (concentrated -> top 20% erhalten 80% der Rides)
     def pick_weighted(lst: List[str], k_weight: float = 0.8) -> str:
         if len(lst) <= 1: return lst[0]
         if distribution == "concentrated":
@@ -249,9 +253,22 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
 
     gross_volume = 0.0
     raw_transactions: List[Dict[str, Any]] = []
-
-    # Nur Empfänger saldieren (Operatoren/Städte). Rider sind Zahler (keine Payouts).
+    # balances: negative = Empfänger erhält Geld von Bolt
     balances: Dict[str, float] = defaultdict(float)
+
+    def _fare_for(mode: str, rng: random.Random) -> float:
+        if mode == "car": return round(rng.uniform(8.0, 30.0), 2)
+        if mode == "scooter": return round(rng.uniform(1.0, 5.0), 2)
+        roll = rng.random()
+        if roll < 0.6: return round(rng.uniform(1.0, 5.0), 2)      # scooter
+        if roll < 0.9: return round(rng.uniform(8.0, 30.0), 2)     # car
+        return round(rng.uniform(0.5, 3.0), 2)                      # sonstige
+
+    def _round_amt(x: float, mode: str) -> float:
+        d = Decimal(str(x))
+        if mode == "bankers":
+            return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
+        return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
     for _ in range(max(1, payload.transaction_count)):
         rider = rng.choice(riders)
@@ -259,16 +276,16 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         gross_volume += fare
         raw_transactions.append({"participant_id": rider, "amount": fare})
 
-        op = pick_weighted(operators)
+        fp = pick_weighted(fleet)
         ct = pick_weighted(cities)
 
-        balances[op] += -fare * operator_share   # empfangen (negativ = erhält)
+        balances[fp] += -fare * fleet_share
         balances[ct] += -fare * city_share
 
-    # Runden & Schwellen anwenden je Rolle
+    # Runden & Schwellen nach Rolle
     def role_of(pid: str) -> str:
         if pid.startswith("City-"): return "city"
-        if pid.startswith("Operator-"): return "operator"
+        if pid.startswith("Fleet-"): return "fleet_partner"
         return "other"
 
     rounded: Dict[str, float] = {}
@@ -277,11 +294,11 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         amt_r = _round_amt(amt, round_mode)
         thr = min_payout_global
         if role == "city": thr = max(thr, min_city)
-        if role == "operator": thr = max(thr, min_op)
+        if role == "fleet_partner": thr = max(thr, min_fleet)
         if abs(amt_r) < thr:
             amt_r = 0.0
         if abs(amt_r) >= 0.01:
-                rounded[pid] = amt_r
+            rounded[pid] = amt_r
 
     netted_payouts = {pid: round(val, 2) for pid, val in rounded.items()}
     netted_transaction_count = len(netted_payouts)
@@ -316,4 +333,5 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
             "response_body": { "final_net_balances": netted_payouts }
         }
     }
+
 

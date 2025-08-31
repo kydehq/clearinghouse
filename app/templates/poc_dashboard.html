@@ -10,7 +10,7 @@
     :focus-visible { outline:2px dashed #111; outline-offset:2px; }
     .mono-icon { width:16px; height:16px; stroke:#111; fill:none; stroke-width:2; }
     .tabnums { font-feature-settings:"tnum"; }
-    .btn { /* nur falls du später wieder Buttons brauchst */
+    .btn {
       border-radius:.5rem; border:1px solid #111827; background:#111827; color:#fff;
       padding:.5rem 1rem; font-size:.875rem; font-weight:500;
     }
@@ -72,7 +72,7 @@
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
               <label class="block">
-                <span class="text-sm text-gray-700">Operatoren</span>
+                <span class="text-sm text-gray-700">Fleet-Partner</span>
                 <input id="inp-ops" type="number" min="2" max="2000" value="20"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
@@ -84,7 +84,7 @@
             </div>
             <div class="grid grid-cols-2 gap-3">
               <label class="block">
-                <span class="text-sm text-gray-700">Operator-Anteil (%)</span>
+                <span class="text-sm text-gray-700">Fleet-Partner-Anteil (%)</span>
                 <input id="inp-opshare" type="number" step="1" min="0" max="100" value="90"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
@@ -127,7 +127,7 @@
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
               <label class="block">
-                <span class="text-sm text-gray-700">Min. Auszahlung Operator (EUR)</span>
+                <span class="text-sm text-gray-700">Min. Auszahlung Fleet-Partner (EUR)</span>
                 <input id="inp-min-op" type="number" step="0.01" min="0" value="1.00"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
@@ -165,7 +165,7 @@
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Einzeltransaktionen</div><div id="m-tx" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
             <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Umsatz gesamt</div><div id="m-gross" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
-            <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Gebühren vor Verrechnung</div><div id="m-estfees" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
+            <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Auszahlungsgebühren (ohne Verrechnung)</div><div id="m-estfees" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
           </div>
           <div class="rounded-lg border border-gray-200">
             <div class="p-3 border-b border-gray-200 text-sm text-gray-600 flex items-center justify-between">
@@ -178,13 +178,13 @@
         </div>
       </section>
 
-      <!-- 2) Nachher (ohne Button/Badge, Auto-Run + Preloader) -->
+      <!-- 2) Nachher -->
       <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div class="p-4 border-b border-gray-200">
           <h2 class="font-semibold">2) Nachher — Auszahlungen nach Verrechnung</h2>
         </div>
 
-        <!-- Loader-Card (sichtbar zwischen Ende von 1) und API-Ergebnis) -->
+        <!-- Loader -->
         <div id="after-loader" class="m-4 rounded-lg border border-gray-200 p-4 hidden">
           <div class="animate-pulse space-y-3">
             <div class="h-6 bg-gray-100 rounded"></div>
@@ -198,7 +198,7 @@
           </div>
         </div>
 
-        <!-- Inhalt-Card -->
+        <!-- Inhalt -->
         <div id="after-content" class="p-4 space-y-4 hidden">
           <div class="rounded-lg border border-gray-200 p-4 space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -277,9 +277,9 @@
     // State
     let streaming=true, timerId=null, txCount=0, gross=0, estFees=0;
     let lastRequest=null, lastResponse=null, activeTab="req";
-    let stoppingByTarget=false; // markiert natürliches Ende
+    let stoppingByTarget=false;
 
-    // icons (monochrom)
+    // icons
     const ICONS = {
       scooter:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm14 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M7 17h7l4-10h-3"/></svg>`,
       car:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 12h18l-2-5a2 2 0 0 0-2-1H7a2 2 0 0 0-2 1l-2 5Z"/><path d="M5 12v6M19 12v6"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>`,
@@ -288,22 +288,22 @@
 
     // ===== Policy DSL =====
     function buildPolicyFromInputs(){
-      const opPct = Math.max(0, Math.min(100, +inpOpShare.value||0));
+      const fleetPct = Math.max(0, Math.min(100, +inpOpShare.value||0));
       const cityPct = Math.max(0, Math.min(100, +inpCityShare.value||0));
       return {
         scenario: inpMode.value,
         fees: { per_payout_eur: +(+inpFee.value||0).toFixed(2) },
         actors: {
           riders: Math.max(1, +inpRiders.value||400),
-          operators: Math.max(1, +inpOps.value||20),
+          fleet_partners: Math.max(1, +inpOps.value||20),
           cities: Math.max(1, +inpCities.value||10)
         },
-        splits: { operator_share: +(opPct/100), city_share: +(cityPct/100) },
+        splits: { fleet_share: +(fleetPct/100), city_share: +(cityPct/100) },
         thresholds: { min_payout_eur: +(+inpMin.value||0).toFixed(2) },
         rules: [
-          { match: { role: "city" },     min_payout_eur: +(+inpMinCity.value||0).toFixed(2) },
-          { match: { role: "operator" }, min_payout_eur: +(+inpMinOp.value||0).toFixed(2) },
-          { match: { role: "all" },      round: inpRound.value }
+          { match: { role: "city" },          min_payout_eur: +(+inpMinCity.value||0).toFixed(2) },
+          { match: { role: "fleet_partner" }, min_payout_eur: +(+inpMinOp.value||0).toFixed(2) },
+          { match: { role: "all" },           round: inpRound.value }
         ],
         optimize: { distribution: inpDistribution.value }
       };
@@ -314,18 +314,33 @@
         const p = JSON.parse(taPolicy.value||"{}");
         if(p.scenario) inpMode.value=p.scenario;
         if(p.fees?.per_payout_eur!=null) inpFee.value=p.fees.per_payout_eur;
-        if(p.actors){ if(p.actors.riders) inpRiders.value=p.actors.riders;
-                      if(p.actors.operators) inpOps.value=p.actors.operators;
-                      if(p.actors.cities) inpCities.value=p.actors.cities; }
-        if(p.splits){ if(p.splits.operator_share!=null) inpOpShare.value=Math.round(p.splits.operator_share*100);
-                      if(p.splits.city_share!=null) inpCityShare.value=Math.round(p.splits.city_share*100); }
+
+        // Backwards-compat: operators/fleet_partners
+        if(p.actors){
+          if(p.actors.riders) inpRiders.value=p.actors.riders;
+          const fp = p.actors.fleet_partners ?? p.actors.operators;
+          if(fp) inpOps.value=fp;
+          if(p.actors.cities) inpCities.value=p.actors.cities;
+        }
+        if(p.splits){
+          const fs = p.splits.fleet_share ?? p.splits.operator_share;
+          if(fs!=null) inpOpShare.value=Math.round(fs*100);
+          if(p.splits.city_share!=null) inpCityShare.value=Math.round(p.splits.city_share*100);
+        }
         if(p.thresholds?.min_payout_eur!=null) inpMin.value=p.thresholds.min_payout_eur;
+
         const roundRule = (p.rules||[]).find(r=>r.match?.role==="all" && r.round);
         if(roundRule) inpRound.value=roundRule.round;
+
         const cityRule = (p.rules||[]).find(r=>r.match?.role==="city" && r.min_payout_eur!=null);
         if(cityRule) inpMinCity.value=cityRule.min_payout_eur;
-        const opRule = (p.rules||[]).find(r=>r.match?.role==="operator" && r.min_payout_eur!=null);
-        if(opRule) inpMinOp.value=opRule.min_payout_eur;
+
+        const fpRule = (p.rules||[]).find(r=>{
+          const role=r.match?.role;
+          return (role==="fleet_partner"||role==="operator") && r.min_payout_eur!=null;
+        });
+        if(fpRule) inpMinOp.value=fpRule.min_payout_eur;
+
         if(p.optimize?.distribution) inpDistribution.value=p.optimize.distribution;
       }catch(e){ alert("Policy JSON ungültig: "+(e?.message||e)); }
       renderPolicy();
@@ -334,7 +349,7 @@
     // ===== Stream logic =====
     function startStream(){
       stopStream(false);
-      streaming=true; liveBadge.textContent="live";
+      liveBadge.textContent="live";
       const target = parseInt(inpCount.value||"0",10);
       const mode = inpMode.value;
 
@@ -366,11 +381,9 @@
     }
 
     function stopStream(dueToTarget){
-      streaming=false; liveBadge.textContent="paused";
       if(timerId){ clearInterval(timerId); timerId=null; }
-      stoppingByTarget = !!dueToTarget;
-      if(stoppingByTarget){
-        // kurzer dramatischer Preloader, dann Auto-Netting
+      liveBadge.textContent="paused";
+      if(dueToTarget){
         showAfterLoader(true);
         setTimeout(runAutoNetting, 700);
       }
@@ -382,13 +395,11 @@
       mEst.textContent = fmtEUR.format(estFees);
       const maxTx=Math.max(1,target);
       const h = Math.max(6, Math.min(100, Math.round((txCount/maxTx)*100)));
-      // Vorher-Balken schon live anpassen
       const barB = document.getElementById("bar-before");
       if(barB) barB.style.height = h+"%";
     }
 
     function resetAll(){
-      // Reset UI
       list.innerHTML=""; txCount=0; gross=0; estFees=0;
       mTx.textContent="0"; mGross.textContent="€0,00"; mEst.textContent="€0,00";
       document.getElementById("bar-before").style.height="10%";
@@ -397,7 +408,6 @@
       listPayouts.innerHTML=""; wrapPayouts.classList.add("hidden"); lblPayoutCount.textContent="";
       lastRequest=null; lastResponse=null; activeTab="req"; renderCode();
       showAfterLoader(false); afterContent.classList.add("hidden");
-      // Policy neu generieren & Stream starten
       renderPolicy();
       startStream();
     }
