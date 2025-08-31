@@ -10,33 +10,28 @@
     :focus-visible { outline:2px dashed #111; outline-offset:2px; }
     .mono-icon { width:16px; height:16px; stroke:#111; fill:none; stroke-width:2; }
     .tabnums { font-feature-settings:"tnum"; }
-    .btn {
-      border-radius:.5rem; border:1px solid #111827; background:#111827; color:#fff;
-      padding:.5rem 1rem; font-size:.875rem; font-weight:500;
-    }
+    .hidden-important { display: none !important; } /* für harte Hides */
   </style>
 </head>
 <body class="antialiased text-gray-900">
-    <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
-        <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
-          <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
-          <span class="font-semibold tracking-tight">Clearinghouse PoC</span>
-          <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
-          <span class="text-sm text-gray-600 hidden md:inline">Von <strong>Chaos</strong> zu <strong>Finalität</strong> mit einem Klick</span>
-      
-          <div class="ml-auto flex items-center gap-2">
-            <label for="usecase-switch" class="text-xs text-gray-600 hidden sm:block">Use Case</label>
-            <select id="usecase-switch" class="rounded border border-gray-300 px-2 py-1.5 text-sm">
-              <option value="mobility" selected>Mobility</option>
-              <option value="energy">Energy Community</option>
-            </select>
-      
-            <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
-            <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
-          </div>
-        </div>
-      </header>
-      
+  <!-- Header -->
+  <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
+    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+      <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
+      <span id="hdr-title" class="font-semibold tracking-tight">Clearinghouse PoC</span>
+      <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
+      <span id="hdr-tagline" class="text-sm text-gray-600 hidden md:inline">Von <strong>Chaos</strong> zu <strong>Finalität</strong> mit einem Klick</span>
+      <div class="ml-auto flex items-center gap-2">
+        <label for="usecase-switch" class="text-xs text-gray-600 hidden sm:block">Use Case</label>
+        <select id="usecase-switch" class="rounded border border-gray-300 px-2 py-1.5 text-sm">
+          <option value="mobility" selected>Mobility</option>
+          <option value="energy">Energy Community</option>
+        </select>
+        <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
+        <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
+      </div>
+    </div>
+  </header>
 
   <main class="mx-auto max-w-7xl p-4 md:p-6 grid grid-cols-1 gap-6">
     <!-- 0) Einstellungen & Policy -->
@@ -49,7 +44,7 @@
           <!-- Basic -->
           <div class="space-y-3">
             <div class="text-sm font-medium">Grundlage</div>
-            <label class="block">
+            <label id="row-mode" class="block">
               <span class="text-sm text-gray-700">Modus</span>
               <select id="inp-mode" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm">
                 <option value="scooter">Scooter Sharing</option>
@@ -57,13 +52,13 @@
                 <option value="mixed" selected>Mixed Mobility</option>
               </select>
             </label>
-            <label class="block">
-              <span class="text-sm text-gray-700">Transaktionen (heute)</span>
+            <label id="row-count" class="block">
+              <span class="text-sm text-gray-700" id="lbl-count">Transaktionen (heute)</span>
               <input id="inp-count" type="number" min="50" max="20000" value="500"
                      class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
             </label>
-            <label class="block">
-              <span class="text-sm text-gray-700">Gebühr pro Auszahlung (EUR)</span>
+            <label id="row-fee" class="block">
+              <span class="text-sm text-gray-700" id="lbl-fee">Gebühr pro Auszahlung (EUR)</span>
               <input id="inp-fee" type="number" step="0.01" min="0" value="0.30"
                      class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
             </label>
@@ -73,35 +68,35 @@
           <div class="space-y-3">
             <div class="text-sm font-medium">Akteure &amp; Anteile</div>
             <div class="grid grid-cols-3 gap-3">
-              <label class="block">
-                <span class="text-sm text-gray-700">Rider</span>
+              <label id="row-riders" class="block">
+                <span class="text-sm text-gray-700" id="lbl-riders">Rider</span>
                 <input id="inp-riders" type="number" min="50" max="20000" value="400"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
-              <label class="block">
-                <span class="text-sm text-gray-700">Fleet-Partner</span>
+              <label id="row-ops" class="block">
+                <span class="text-sm text-gray-700" id="lbl-ops">Fleet-Partner</span>
                 <input id="inp-ops" type="number" min="2" max="2000" value="20"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
-              <label class="block">
-                <span class="text-sm text-gray-700">Städte</span>
+              <label id="row-cities" class="block">
+                <span class="text-sm text-gray-700" id="lbl-cities">Städte</span>
                 <input id="inp-cities" type="number" min="1" max="2000" value="10"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
             </div>
             <div class="grid grid-cols-2 gap-3">
-              <label class="block">
-                <span class="text-sm text-gray-700">Fleet-Partner-Anteil (%)</span>
+              <label id="row-opshare" class="block">
+                <span class="text-sm text-gray-700" id="lbl-opshare">Fleet-Partner-Anteil (%)</span>
                 <input id="inp-opshare" type="number" step="1" min="0" max="100" value="90"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
-              <label class="block">
-                <span class="text-sm text-gray-700">City-Anteil (%)</span>
+              <label id="row-cityshare" class="block">
+                <span class="text-sm text-gray-700" id="lbl-cityshare">City-Anteil (%)</span>
                 <input id="inp-cityshare" type="number" step="1" min="0" max="100" value="10"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
             </div>
-            <label class="block">
+            <label id="row-distribution" class="block">
               <span class="text-sm text-gray-700">Verteilungsstrategie</span>
               <select id="inp-distribution" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm">
                 <option value="uniform" selected>gleichmäßig verteilt</option>
@@ -114,12 +109,12 @@
           <div class="space-y-3">
             <div class="text-sm font-medium">Regeln (deklarativ)</div>
             <div class="grid grid-cols-2 gap-3">
-              <label class="block">
+              <label id="row-min-global" class="block">
                 <span class="text-sm text-gray-700">Min. Auszahlung (global, EUR)</span>
                 <input id="inp-minpayout" type="number" step="0.01" min="0" value="1.00"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
-              <label class="block">
+              <label id="row-round" class="block">
                 <span class="text-sm text-gray-700">Rundung</span>
                 <select id="inp-round" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm">
                   <option value="half_up" selected>kaufmännisch (0.5 aufwärts)</option>
@@ -128,13 +123,13 @@
               </label>
             </div>
             <div class="grid grid-cols-2 gap-3">
-              <label class="block">
-                <span class="text-sm text-gray-700">Min. Auszahlung City (EUR)</span>
+              <label id="row-min-city" class="block">
+                <span class="text-sm text-gray-700" id="lbl-min-city">Min. Auszahlung City (EUR)</span>
                 <input id="inp-min-city" type="number" step="0.01" min="0" value="5.00"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
-              <label class="block">
-                <span class="text-sm text-gray-700">Min. Auszahlung Fleet-Partner (EUR)</span>
+              <label id="row-min-op" class="block">
+                <span class="text-sm text-gray-700" id="lbl-min-op">Min. Auszahlung Fleet-Partner (EUR)</span>
                 <input id="inp-min-op" type="number" step="0.01" min="0" value="1.00"
                        class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
               </label>
@@ -165,18 +160,28 @@
       <!-- 1) Vorher -->
       <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 class="font-semibold">1) Vorher — Viele Einzeltransaktionen</h2>
+          <h2 id="hdr-before" class="font-semibold">1) Vorher — Viele Einzeltransaktionen</h2>
           <span id="live-badge" class="rounded-full border border-gray-300 px-2.5 py-0.5 text-xs">live</span>
         </div>
         <div class="p-4 space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Einzeltransaktionen</div><div id="m-tx" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
-            <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Umsatz gesamt</div><div id="m-gross" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
-            <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Auszahlungsgebühren (ohne Verrechnung)</div><div id="m-estfees" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="text-xs text-gray-500">Einzeltransaktionen</div>
+              <div id="m-tx" class="mt-1 text-2xl font-semibold tabnums">0</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div id="lbl-gross" class="text-xs text-gray-500">Umsatz gesamt</div>
+              <div id="m-gross" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+              <div class="text-xs text-gray-500">Auszahlungsgebühren (ohne Verrechnung)</div>
+              <div id="m-estfees" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
+            </div>
           </div>
           <div class="rounded-lg border border-gray-200">
             <div class="p-3 border-b border-gray-200 text-sm text-gray-600 flex items-center justify-between">
-              <span>Live-Transaktionsstrom (stoppt bei Zielzahl)</span><span class="text-xs text-gray-500">max. 100 sichtbar</span>
+              <span id="lbl-stream">Live-Transaktionsstrom (stoppt bei Zielzahl)</span>
+              <span class="text-xs text-gray-500">max. 100 sichtbar</span>
             </div>
             <div class="h-[260px] overflow-auto">
               <ul id="list-stream" class="p-3 space-y-2"></ul>
@@ -188,7 +193,7 @@
       <!-- 2) Nachher -->
       <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div class="p-4 border-b border-gray-200">
-          <h2 class="font-semibold">2) Nachher — Auszahlungen nach Verrechnung</h2>
+          <h2 id="hdr-after" class="font-semibold">2) Nachher — Auszahlungen nach Verrechnung</h2>
         </div>
 
         <!-- Loader -->
@@ -209,29 +214,46 @@
         <div id="after-content" class="p-4 space-y-4 hidden">
           <div class="rounded-lg border border-gray-200 p-4 space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Externe Auszahlungen</div><div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
-              <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Gebühren heute</div><div id="m-actual" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
-              <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Ersparnis heute</div><div id="m-savings" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
+              <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Externe Auszahlungen</div>
+                <div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div>
+              </div>
+              <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Gebühren heute</div>
+                <div id="m-actual" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
+              </div>
+              <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Ersparnis heute</div>
+                <div id="m-savings" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
+              </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div class="rounded-lg border border-gray-200 p-3">
-                  <div class="text-xs text-gray-500">Intern verrechnet (Offset)</div>
-                  <div id="m-offset" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
-                </div>
-                <div class="rounded-lg border border-gray-200 p-3">
-                  <div class="text-xs text-gray-500">Obligationen (heute)</div>
-                  <div id="m-obligations" class="mt-1 text-2xl font-semibold tabnums">0</div>
-                </div>
+              <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Intern verrechnet (Offset)</div>
+                <div id="m-offset" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
               </div>
-              
+              <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Obligationen (heute)</div>
+                <div id="m-obligations" class="mt-1 text-2xl font-semibold tabnums">0</div>
+              </div>
+            </div>
 
             <div>
               <div class="text-sm text-gray-600 mb-2">Kompression (Transaktionen → Auszahlungen)</div>
               <div class="h-52 border border-gray-200 rounded-lg p-3 flex items-end gap-6">
-                <div class="flex-1 flex flex-col items-center justify-end"><div id="bar-before" class="w-10 bg-gray-900 rounded-t" style="height:10%;"></div><div class="mt-2 text-xs text-gray-600">Vorher</div></div>
-                <div class="flex-1 flex flex-col items-center justify-end"><div id="bar-after" class="w-10 bg-gray-700 rounded-t" style="height:5%;"></div><div class="mt-2 text-xs text-gray-600">Nachher</div></div>
-                <div class="flex-1 flex flex-col items-center justify-center text-center"><div class="text-xs text-gray-500">Verhältnis</div><div id="lbl-ratio" class="mt-1 text-lg font-semibold tabnums">–</div></div>
+                <div class="flex-1 flex flex-col items-center justify-end">
+                  <div id="bar-before" class="w-10 bg-gray-900 rounded-t" style="height:10%;"></div>
+                  <div class="mt-2 text-xs text-gray-600">Vorher</div>
+                </div>
+                <div class="flex-1 flex flex-col items-center justify-end">
+                  <div id="bar-after" class="w-10 bg-gray-700 rounded-t" style="height:5%;"></div>
+                  <div class="mt-2 text-xs text-gray-600">Nachher</div>
+                </div>
+                <div class="flex-1 flex flex-col items-center justify-center text-center">
+                  <div class="text-xs text-gray-500">Verhältnis</div>
+                  <div id="lbl-ratio" class="mt-1 text-lg font-semibold tabnums">–</div>
+                </div>
               </div>
             </div>
 
@@ -289,34 +311,57 @@
     const mNetted=$("#m-netted"), mActual=$("#m-actual"), mSavings=$("#m-savings");
     const barBefore=$("#bar-before"), barAfter=$("#bar-after"), lblRatio=$("#lbl-ratio");
     const wrapPayouts=$("#wrap-payouts"), listPayouts=$("#list-payouts"), lblPayoutCount=$("#lbl-payout-count");
-
     const tabReq=$("#tab-req"), tabRes=$("#tab-res"), codeArea=$("#code-area"), btnCopy=$("#btn-copy"), copyDone=$("#copy-done");
     const btnRerun=$("#btn-rerun");
+    const mOffset = $("#m-offset");
+    const mOblig  = $("#m-obligations");
 
-    const mOffset = document.querySelector("#m-offset");
-    const mOblig  = document.querySelector("#m-obligations");
+    // Usecase switch + headline bits
+    const usecaseSwitch = $("#usecase-switch");
+    const hdrTitle = $("#hdr-title");
+    const hdrBefore = $("#hdr-before");
+    const hdrAfter  = $("#hdr-after");
+    const lblGross  = $("#lbl-gross");
+    const lblStream = $("#lbl-stream");
+    const pageTitleEl = document.querySelector("title");
 
-    const usecaseSwitch = document.querySelector("#usecase-switch");
-
-
-
-    // State
-    let streaming=true, timerId=null, txCount=0, gross=0, estFees=0;
-    let lastRequest=null, lastResponse=null, activeTab="req";
-    let stoppingByTarget=false;
-
-    // icons
+    // --- Icons (mono) ---
     const ICONS = {
       scooter:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm14 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M7 17h7l4-10h-3"/></svg>`,
       car:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 12h18l-2-5a2 2 0 0 0-2-1H7a2 2 0 0 0-2 1l-2 5Z"/><path d="M5 12v6M19 12v6"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>`,
-      charge:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8Z"/></svg>`
+      charge:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8Z"/></svg>`,
+      home:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 10L12 3l9 7v10H3z"/><path d="M9 21v-6h6v6"/></svg>`,
+      sun:`<svg class="mono-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>`,
+      market:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 7h18v4a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V7z"/><path d="M8 16v5M16 16v5"/></svg>`
     };
+
+    // ===== State =====
+    let timerId=null, txCount=0, gross=0, estFees=0;
+    let lastRequest=null, lastResponse=null, activeTab="req";
 
     // ===== Policy DSL =====
     function buildPolicyFromInputs(){
+      const uc = usecaseSwitch.value;
+      if (uc === "energy") {
+        return {
+          use_case: "energy",
+          fees: { per_payout_eur: +(+inpFee.value||0).toFixed(2) },
+          actors: { participants: Math.max(1, +inpRiders.value||120) },
+          thresholds: { min_payout_eur: +(+inpMin.value||0).toFixed(2) },
+          rules: [
+            { match: { role: "all" }, round: inpRound.value },
+            { match: { role: "city" },          min_payout_eur: +(+inpMinCity.value||0).toFixed(2) }, // DSO
+            { match: { role: "fleet_partner" }, min_payout_eur: +(+inpMinOp.value||0).toFixed(2) }    // Haushalt
+          ]
+          // prices könnte optional ergänzt werden (pv/local/grid/flex), Defaults sind im Backend
+        };
+      }
+
+      // Mobility (wie gehabt)
       const fleetPct = Math.max(0, Math.min(100, +inpOpShare.value||0));
       const cityPct = Math.max(0, Math.min(100, +inpCityShare.value||0));
       return {
+        use_case: "mobility",
         scenario: inpMode.value,
         fees: { per_payout_eur: +(+inpFee.value||0).toFixed(2) },
         actors: {
@@ -334,27 +379,39 @@
         optimize: { distribution: inpDistribution.value }
       };
     }
-    function renderPolicy(){ if(!chkEdit.checked){ taPolicy.value = JSON.stringify(buildPolicyFromInputs(), null, 2); } }
+
+    function renderPolicy(){
+      if(!chkEdit.checked){
+        taPolicy.value = JSON.stringify(buildPolicyFromInputs(), null, 2);
+      }
+    }
+
     function applyPolicyTextareaToInputs(){
       try{
         const p = JSON.parse(taPolicy.value||"{}");
-        if(p.scenario) inpMode.value=p.scenario;
-        if(p.fees?.per_payout_eur!=null) inpFee.value=p.fees.per_payout_eur;
 
-        // Backwards-compat: operators/fleet_partners
+        // Basics
+        if(p.fees?.per_payout_eur!=null) inpFee.value=p.fees.per_payout_eur;
+        if(p.scenario) inpMode.value=p.scenario;
+
+        // Actors (mobility & energy)
         if(p.actors){
           if(p.actors.riders) inpRiders.value=p.actors.riders;
+          if(p.actors.participants) inpRiders.value=p.actors.participants; // Energy mapping
           const fp = p.actors.fleet_partners ?? p.actors.operators;
           if(fp) inpOps.value=fp;
           if(p.actors.cities) inpCities.value=p.actors.cities;
         }
+
+        // Splits (mobility)
         if(p.splits){
           const fs = p.splits.fleet_share ?? p.splits.operator_share;
           if(fs!=null) inpOpShare.value=Math.round(fs*100);
           if(p.splits.city_share!=null) inpCityShare.value=Math.round(p.splits.city_share*100);
         }
-        if(p.thresholds?.min_payout_eur!=null) inpMin.value=p.thresholds.min_payout_eur;
 
+        // Thresholds & rounding
+        if(p.thresholds?.min_payout_eur!=null) inpMin.value=p.thresholds.min_payout_eur;
         const roundRule = (p.rules||[]).find(r=>r.match?.role==="all" && r.round);
         if(roundRule) inpRound.value=roundRule.round;
 
@@ -372,22 +429,123 @@
       renderPolicy();
     }
 
+    // ===== UI Skinning (Mobility/Energy) =====
+    function applyUsecaseSkin(){
+      const uc = usecaseSwitch.value;
+
+      // Show/hide rows
+      const show = (sel, on)=>{ const el=$(sel); if(!el) return; el.classList.toggle("hidden", !on); };
+
+      if (uc === "energy") {
+        pageTitleEl.textContent = "KYDE – Energy Community PoC";
+        hdrTitle.textContent = "Clearinghouse PoC – Energy";
+        hdrBefore.textContent = "1) Vorher — Viele Micro-Events (Haushalte/PV/Flex)";
+        hdrAfter.textContent  = "2) Nachher — Auszahlungen nach Verrechnung";
+        lblGross.textContent  = "Volumen (indikativ)";
+
+        $("#lbl-riders").textContent = "Haushalte / Prosumer";
+        $("#lbl-ops").textContent    = "—";
+        $("#lbl-cities").textContent = "—";
+        $("#lbl-opshare").textContent = "—";
+        $("#lbl-cityshare").textContent = "—";
+        $("#lbl-min-city").textContent = "Min. Auszahlung DSO (EUR)";
+        $("#lbl-min-op").textContent   = "Min. Auszahlung Haushalt (EUR)";
+        $("#lbl-stream").textContent   = "Live-Events (Konsum, PV, Flex) – stoppt bei Zielzahl";
+
+        // Hide nicht benötigte Inputs
+        show("#row-mode", false);
+        show("#row-ops", false);
+        show("#row-cities", false);
+        show("#row-opshare", false);
+        show("#row-cityshare", false);
+        show("#row-distribution", false);
+
+      } else {
+        pageTitleEl.textContent = "KYDE – Mobility Sharing PoC";
+        hdrTitle.textContent = "Clearinghouse PoC";
+        hdrBefore.textContent = "1) Vorher — Viele Einzeltransaktionen";
+        hdrAfter.textContent  = "2) Nachher — Auszahlungen nach Verrechnung";
+        lblGross.textContent  = "Umsatz gesamt";
+
+        $("#lbl-riders").textContent = "Rider";
+        $("#lbl-ops").textContent    = "Fleet-Partner";
+        $("#lbl-cities").textContent = "Städte";
+        $("#lbl-opshare").textContent = "Fleet-Partner-Anteil (%)";
+        $("#lbl-cityshare").textContent = "City-Anteil (%)";
+        $("#lbl-min-city").textContent = "Min. Auszahlung City (EUR)";
+        $("#lbl-min-op").textContent   = "Min. Auszahlung Fleet-Partner (EUR)";
+        $("#lbl-stream").textContent   = "Live-Transaktionsstrom (stoppt bei Zielzahl)";
+
+        // Show wieder alles
+        show("#row-mode", true);
+        show("#row-ops", true);
+        show("#row-cities", true);
+        show("#row-opshare", true);
+        show("#row-cityshare", true);
+        show("#row-distribution", true);
+      }
+
+      renderPolicy();
+      resetAll(false); // neu starten mit neuem „Skin“
+    }
+
     // ===== Stream logic =====
     function startStream(){
       stopStream(false);
       liveBadge.textContent="live";
       const target = parseInt(inpCount.value||"0",10);
       const mode = inpMode.value;
+      const uc = usecaseSwitch.value;
 
       timerId = setInterval(()=>{
         if(txCount >= target){ stopStream(true); return; }
 
-        // Typ wählen
+        if (uc === "energy") {
+          // --- Energy: HH-IDs + Event-Typen (Konsum, PV, Flex) ---
+          const hhIndex = Math.floor(Math.random() * Math.min(target*0.9, 5000)) + 1;
+          const hh = "HH-"+String(hhIndex).padStart(4,"0");
+
+          const r = Math.random();
+          let icon = ICONS.home, amt = 0;
+
+          if (r < 0.55) {
+            // Konsum: 0.6-4.0 kWh zu 0.18-0.40 €/kWh
+            const kwh = +(0.6 + Math.random()*3.4).toFixed(2);
+            const price = +(0.18 + Math.random()*0.22).toFixed(2);
+            amt = +(kwh * price).toFixed(2);
+            icon = ICONS.home;
+          } else if (r < 0.90) {
+            // PV-Einspeisung: 0.3-2.5 kWh * 0.14 €
+            const gen = +(0.3 + Math.random()*2.2).toFixed(2);
+            const price = 0.14;
+            amt = +(gen * price).toFixed(2);
+            icon = ICONS.sun;
+          } else {
+            // Flex/Regelenergie: 0.5-3.0 kWh * 0.08-0.16 €
+            const flex = +(0.5 + Math.random()*2.5).toFixed(2);
+            const price = +(0.08 + Math.random()*0.08).toFixed(2);
+            amt = +(flex * price).toFixed(2);
+            icon = ICONS.market;
+          }
+
+          const li=document.createElement("li");
+          li.className="flex items-center justify-between rounded border border-gray-200 px-3 py-2 text-sm";
+          li.innerHTML = `<span class="flex items-center gap-2">${icon}<span class="font-medium">${hh}</span></span><span class="tabnums">${fmtEUR.format(amt)}</span>`;
+          list.prepend(li);
+          while(list.children.length>100) list.removeChild(list.lastChild);
+
+          txCount += 1;
+          gross = +(gross + Math.abs(amt)).toFixed(2);
+          estFees = +(estFees + parseFloat(inpFee.value||"0")).toFixed(2);
+          renderBefore(target);
+          return;
+        }
+
+        // --- Mobility (wie bisher) ---
         let t="scooter";
         if(mode==="car") t="car";
         else if(mode==="mixed") t = Math.random() < 0.6 ? "scooter" : (Math.random()<0.85 ? "car" : "charge");
 
-        // Rider-ID & Betrag
         const riderIndex = Math.floor(Math.random() * Math.min(target*0.9, 5000)) + 1;
         const rider = "Rider-"+String(riderIndex).padStart(4,"0");
         let amt = t==="car" ? +(8+Math.random()*22).toFixed(2) : +(1+Math.random()*4).toFixed(2);
@@ -425,16 +583,17 @@
       if(barB) barB.style.height = h+"%";
     }
 
-    function resetAll(){
+    function resetAll(fromButton=true){
+      // reset UI numbers
       list.innerHTML=""; txCount=0; gross=0; estFees=0;
       mTx.textContent="0"; mGross.textContent="€0,00"; mEst.textContent="€0,00";
-      document.getElementById("bar-before").style.height="10%";
-      document.getElementById("bar-after").style.height="5%";
+      $("#bar-before").style.height="10%";
+      $("#bar-after").style.height="5%";
       lblRatio.textContent="–";
       listPayouts.innerHTML=""; wrapPayouts.classList.add("hidden"); lblPayoutCount.textContent="";
       lastRequest=null; lastResponse=null; activeTab="req"; renderCode();
       showAfterLoader(false); afterContent.classList.add("hidden");
-      renderPolicy();
+      if (fromButton) renderPolicy(); // bei Skin-Umschaltung wurde schon gerendert
       startStream();
     }
 
@@ -442,7 +601,7 @@
       afterLoader.classList.toggle("hidden", !show);
     }
 
-    // ===== Auto-Netting (API) =====
+    // ===== API call =====
     async function runAutoNetting(){
       try{
         const policy = JSON.parse(taPolicy.value||"{}");
@@ -453,8 +612,6 @@
         if(!res.ok) throw new Error("HTTP "+res.status);
         const data = await res.json();
         lastResponse = data;
-        
-
 
         showAfterLoader(false);
         renderAfter(data);
@@ -495,17 +652,15 @@
       const ratio = after.metrics.compression_ratio || (beforeTx && afterTx ? (beforeTx/afterTx).toFixed(2) : "–");
       lblRatio.textContent = ratio+"×";
 
-
       // neue KPIs
       const obligations = resp?.before?.metrics?.obligations_created ?? 0;
       const offsetEUR   = resp?.after?.metrics?.internal_offset_eur ?? 0;
-
       if (mOblig)  mOblig.textContent  = String(obligations);
       if (mOffset) mOffset.textContent = fmtEUR.format(offsetEUR);
 
-
+      // Liste
       listPayouts.innerHTML="";
-      const entries = Object.entries(after.netted_payouts)
+      const entries = Object.entries(after.netted_payouts || {})
         .map(([pid, amt]) => ({pid, amt: Number(amt)}))
         .sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt));
       entries.forEach(({pid, amt})=>{
@@ -520,7 +675,7 @@
     }
 
     // ===== Events =====
-    btnRerun.addEventListener("click", resetAll);
+    btnRerun.addEventListener("click", ()=>resetAll(true));
     tabReq.addEventListener("click", ()=>{ activeTab="req"; renderCode(); });
     tabRes.addEventListener("click", ()=>{ activeTab="res"; renderCode(); });
     btnCopy.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(codeArea.textContent||""); copyDone.classList.remove("hidden"); setTimeout(()=>copyDone.classList.add("hidden"),1200);}catch(_){}});
@@ -529,11 +684,13 @@
     btnApplyPolicy.addEventListener("click", applyPolicyTextareaToInputs);
 
     [inpMode, inpCount, inpFee, inpRiders, inpOps, inpCities, inpOpShare, inpCityShare, inpDistribution, inpMin, inpRound, inpMinCity, inpMinOp]
-      .forEach(el => el.addEventListener("change", ()=>{ renderPolicy(); resetAll(); }));
+      .forEach(el => el.addEventListener("change", ()=>{ renderPolicy(); resetAll(true); }));
+
+    usecaseSwitch.addEventListener("change", applyUsecaseSkin);
 
     // Init
     renderPolicy();
-    resetAll();
+    applyUsecaseSkin(); // setzt Skin + startet Stream
   </script>
 </body>
 </html>
