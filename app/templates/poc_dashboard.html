@@ -10,7 +10,10 @@
     :focus-visible { outline:2px dashed #111; outline-offset:2px; }
     .mono-icon { width:16px; height:16px; stroke:#111; fill:none; stroke-width:2; }
     .tabnums { font-feature-settings:"tnum"; }
-    .btn { @apply rounded border border-gray-900 bg-gray-900 text-white px-4 py-2 text-sm font-medium hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed; }
+    .btn { /* nur falls du später wieder Buttons brauchst */
+      border-radius:.5rem; border:1px solid #111827; background:#111827; color:#fff;
+      padding:.5rem 1rem; font-size:.875rem; font-weight:500;
+    }
   </style>
 </head>
 <body class="antialiased text-gray-900">
@@ -102,7 +105,7 @@
 
           <!-- Rules -->
           <div class="space-y-3">
-            <div class="text-sm font-medium">Regeln (ohne if/else, deklarativ)</div>
+            <div class="text-sm font-medium">Regeln (deklarativ)</div>
             <div class="grid grid-cols-2 gap-3">
               <label class="block">
                 <span class="text-sm text-gray-700">Min. Auszahlung (global, EUR)</span>
@@ -175,22 +178,35 @@
         </div>
       </section>
 
-      <!-- 2) Nachher -->
+      <!-- 2) Nachher (ohne Button/Badge, Auto-Run + Preloader) -->
       <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div class="p-4 border-b border-gray-200">
           <h2 class="font-semibold">2) Nachher — Auszahlungen nach Verrechnung</h2>
         </div>
-        <div class="p-4 space-y-4">
-          <div class="flex items-center gap-3">
-            <button id="btn-run" class="btn">► Verrechnung starten</button>
-            <span id="badge-savings" class="hidden rounded-full border border-gray-300 px-2.5 py-0.5 text-xs"></span>
+
+        <!-- Loader-Card (sichtbar zwischen Ende von 1) und API-Ergebnis) -->
+        <div id="after-loader" class="m-4 rounded-lg border border-gray-200 p-4 hidden">
+          <div class="animate-pulse space-y-3">
+            <div class="h-6 bg-gray-100 rounded"></div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="h-16 bg-gray-100 rounded"></div>
+              <div class="h-16 bg-gray-100 rounded"></div>
+              <div class="h-16 bg-gray-100 rounded"></div>
+            </div>
+            <div class="h-52 bg-gray-100 rounded"></div>
+            <div class="h-56 bg-gray-100 rounded"></div>
           </div>
+        </div>
+
+        <!-- Inhalt-Card -->
+        <div id="after-content" class="p-4 space-y-4 hidden">
           <div class="rounded-lg border border-gray-200 p-4 space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Anzahl Auszahlungen</div><div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div></div>
               <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Gebühren heute</div><div id="m-actual" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
               <div class="rounded-lg border border-gray-200 p-3"><div class="text-xs text-gray-500">Ersparnis heute</div><div id="m-savings" class="mt-1 text-2xl font-semibold tabnums">€0,00</div></div>
             </div>
+
             <div>
               <div class="text-sm text-gray-600 mb-2">Kompression (Transaktionen → Auszahlungen)</div>
               <div class="h-52 border border-gray-200 rounded-lg p-3 flex items-end gap-6">
@@ -199,6 +215,8 @@
                 <div class="flex-1 flex flex-col items-center justify-center text-center"><div class="text-xs text-gray-500">Verhältnis</div><div id="lbl-ratio" class="mt-1 text-lg font-semibold tabnums">–</div></div>
               </div>
             </div>
+
+            <!-- Netted payouts: Liste -->
             <div id="wrap-payouts" class="hidden">
               <div class="mb-2 text-sm text-gray-600 flex items-center justify-between">
                 <span>Auszahlungen (nach Verrechnung)</span>
@@ -248,18 +266,20 @@
 
     // Stream/UI refs
     const list=$("#list-stream"), mTx=$("#m-tx"), mGross=$("#m-gross"), mEst=$("#m-estfees"), liveBadge=$("#live-badge");
-    const btnRun=$("#btn-run"), btnRerun=$("#btn-rerun");
-    const mNetted=$("#m-netted"), mActual=$("#m-actual"), mSavings=$("#m-savings"), badgeSavings=$("#badge-savings");
+    const afterLoader=$("#after-loader"), afterContent=$("#after-content");
+    const mNetted=$("#m-netted"), mActual=$("#m-actual"), mSavings=$("#m-savings");
     const barBefore=$("#bar-before"), barAfter=$("#bar-after"), lblRatio=$("#lbl-ratio");
     const wrapPayouts=$("#wrap-payouts"), listPayouts=$("#list-payouts"), lblPayoutCount=$("#lbl-payout-count");
 
     const tabReq=$("#tab-req"), tabRes=$("#tab-res"), codeArea=$("#code-area"), btnCopy=$("#btn-copy"), copyDone=$("#copy-done");
+    const btnRerun=$("#btn-rerun");
 
     // State
-    let streaming=true, timer=null, idCounter=0, txCount=0, gross=0, estFees=0;
+    let streaming=true, timerId=null, txCount=0, gross=0, estFees=0;
     let lastRequest=null, lastResponse=null, activeTab="req";
+    let stoppingByTarget=false; // markiert natürliches Ende
 
-    // icons
+    // icons (monochrom)
     const ICONS = {
       scooter:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm14 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M7 17h7l4-10h-3"/></svg>`,
       car:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 12h18l-2-5a2 2 0 0 0-2-1H7a2 2 0 0 0-2 1l-2 5Z"/><path d="M5 12v6M19 12v6"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>`,
@@ -271,7 +291,7 @@
       const opPct = Math.max(0, Math.min(100, +inpOpShare.value||0));
       const cityPct = Math.max(0, Math.min(100, +inpCityShare.value||0));
       return {
-        scenario: inpMode.value,                       // "scooter"|"car"|"mixed"
+        scenario: inpMode.value,
         fees: { per_payout_eur: +(+inpFee.value||0).toFixed(2) },
         actors: {
           riders: Math.max(1, +inpRiders.value||400),
@@ -283,16 +303,12 @@
         rules: [
           { match: { role: "city" },     min_payout_eur: +(+inpMinCity.value||0).toFixed(2) },
           { match: { role: "operator" }, min_payout_eur: +(+inpMinOp.value||0).toFixed(2) },
-          { match: { role: "all" },      round: inpRound.value } // "half_up" | "bankers"
+          { match: { role: "all" },      round: inpRound.value }
         ],
-        optimize: { distribution: inpDistribution.value } // "uniform"|"concentrated"
+        optimize: { distribution: inpDistribution.value }
       };
     }
-    function renderPolicy(){
-      if(!chkEdit.checked){
-        taPolicy.value = JSON.stringify(buildPolicyFromInputs(), null, 2);
-      }
-    }
+    function renderPolicy(){ if(!chkEdit.checked){ taPolicy.value = JSON.stringify(buildPolicyFromInputs(), null, 2); } }
     function applyPolicyTextareaToInputs(){
       try{
         const p = JSON.parse(taPolicy.value||"{}");
@@ -316,26 +332,23 @@
     }
 
     // ===== Stream logic =====
-    let timerId=null;
     function startStream(){
-      stopStream();
+      stopStream(false);
       streaming=true; liveBadge.textContent="live";
       const target = parseInt(inpCount.value||"0",10);
       const mode = inpMode.value;
 
       timerId = setInterval(()=>{
-        if(txCount >= target){ stopStream(); return; }
+        if(txCount >= target){ stopStream(true); return; }
 
-        // event type
+        // Typ wählen
         let t="scooter";
         if(mode==="car") t="car";
         else if(mode==="mixed") t = Math.random() < 0.6 ? "scooter" : (Math.random()<0.85 ? "car" : "charge");
 
-        // synthetic rider
+        // Rider-ID & Betrag
         const riderIndex = Math.floor(Math.random() * Math.min(target*0.9, 5000)) + 1;
         const rider = "Rider-"+String(riderIndex).padStart(4,"0");
-
-        // fare
         let amt = t==="car" ? +(8+Math.random()*22).toFixed(2) : +(1+Math.random()*4).toFixed(2);
         if(t==="charge") amt = +(0.5+Math.random()*2.5).toFixed(2);
 
@@ -351,24 +364,68 @@
         renderBefore(target);
       }, 80);
     }
-    function stopStream(){ streaming=false; liveBadge.textContent="paused"; if(timerId){ clearInterval(timerId); timerId=null; } }
+
+    function stopStream(dueToTarget){
+      streaming=false; liveBadge.textContent="paused";
+      if(timerId){ clearInterval(timerId); timerId=null; }
+      stoppingByTarget = !!dueToTarget;
+      if(stoppingByTarget){
+        // kurzer dramatischer Preloader, dann Auto-Netting
+        showAfterLoader(true);
+        setTimeout(runAutoNetting, 700);
+      }
+    }
+
     function renderBefore(target){
       mTx.textContent = String(txCount);
       mGross.textContent = fmtEUR.format(gross);
       mEst.textContent = fmtEUR.format(estFees);
       const maxTx=Math.max(1,target);
-      barBefore.style.height = Math.max(6, Math.min(100, Math.round((txCount/maxTx)*100)))+"%";
+      const h = Math.max(6, Math.min(100, Math.round((txCount/maxTx)*100)));
+      // Vorher-Balken schon live anpassen
+      const barB = document.getElementById("bar-before");
+      if(barB) barB.style.height = h+"%";
     }
+
     function resetAll(){
-      stopStream();
-      list.innerHTML="";
-      txCount=0; gross=0; estFees=0;
+      // Reset UI
+      list.innerHTML=""; txCount=0; gross=0; estFees=0;
       mTx.textContent="0"; mGross.textContent="€0,00"; mEst.textContent="€0,00";
-      barBefore.style.height="10%"; barAfter.style.height="5%"; lblRatio.textContent="–";
+      document.getElementById("bar-before").style.height="10%";
+      document.getElementById("bar-after").style.height="5%";
+      lblRatio.textContent="–";
       listPayouts.innerHTML=""; wrapPayouts.classList.add("hidden"); lblPayoutCount.textContent="";
-      badgeSavings.classList.add("hidden"); mNetted.textContent="0"; mActual.textContent="€0,00"; mSavings.textContent="€0,00";
       lastRequest=null; lastResponse=null; activeTab="req"; renderCode();
-      btnRun.disabled=false; renderPolicy(); startStream();
+      showAfterLoader(false); afterContent.classList.add("hidden");
+      // Policy neu generieren & Stream starten
+      renderPolicy();
+      startStream();
+    }
+
+    function showAfterLoader(show){
+      afterLoader.classList.toggle("hidden", !show);
+    }
+
+    // ===== Auto-Netting (API) =====
+    async function runAutoNetting(){
+      try{
+        const policy = JSON.parse(taPolicy.value||"{}");
+        const body = { transaction_count: txCount, policy_body: policy };
+        lastRequest = body; activeTab="req"; renderCode();
+
+        const res = await fetch("/v1/poc/run-demo", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+        if(!res.ok) throw new Error("HTTP "+res.status);
+        const data = await res.json();
+        lastResponse = data;
+
+        showAfterLoader(false);
+        renderAfter(data);
+        afterContent.classList.remove("hidden");
+        activeTab="res"; renderCode();
+      }catch(err){
+        showAfterLoader(false);
+        alert("Fehler: "+(err?.message||err));
+      }
     }
 
     // ===== API Proof =====
@@ -381,19 +438,22 @@
         tabRes.classList.add("bg-gray-900","text-white"); tabReq.classList.remove("bg-gray-900","text-white");
       }
     }
+
     function renderAfter(resp){
       const after=resp.after;
       mNetted.textContent = String(after.metrics.netted_transactions);
       mActual.textContent = fmtEUR.format(after.metrics.actual_fees_eur);
       mSavings.textContent = fmtEUR.format(after.metrics.savings_eur);
-      badgeSavings.textContent = "Ersparnis " + fmtEUR.format(after.metrics.savings_eur);
-      badgeSavings.classList.remove("hidden");
 
       const beforeTx = txCount;
       const afterTx  = after.metrics.netted_transactions||0;
       const maxTx = Math.max(1,beforeTx);
-      barBefore.style.height = Math.max(6,Math.min(100,Math.round((beforeTx/maxTx)*100)))+"%";
-      barAfter.style.height  = Math.max(2,Math.min(100,Math.round((afterTx/maxTx)*100)))+"%";
+      const barB = document.getElementById("bar-before");
+      const barA = document.getElementById("bar-after");
+      const beforeH = Math.max(6,Math.min(100,Math.round((beforeTx/maxTx)*100)));
+      const afterH  = Math.max(2,Math.min(100,Math.round((afterTx/maxTx)*100)));
+      if(barB) barB.style.height = beforeH+"%";
+      if(barA) barA.style.height = afterH+"%";
       const ratio = after.metrics.compression_ratio || (beforeTx && afterTx ? (beforeTx/afterTx).toFixed(2) : "–");
       lblRatio.textContent = ratio+"×";
 
@@ -413,28 +473,14 @@
     }
 
     // ===== Events =====
-    btnRun.addEventListener("click", async ()=>{
-      stopStream(); btnRun.disabled=true;
-      const policy = JSON.parse(taPolicy.value||"{}");
-      const body = { transaction_count: txCount, policy_body: policy };
-      lastRequest = body; activeTab="req"; renderCode();
-      try{
-        const res = await fetch("/v1/poc/run-demo", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
-        if(!res.ok) throw new Error("HTTP "+res.status);
-        const data = await res.json(); lastResponse=data; renderAfter(data); activeTab="res"; renderCode();
-      }catch(err){ alert("Fehler: "+(err?.message||err)); btnRun.disabled=false; startStream(); }
-    });
-
     btnRerun.addEventListener("click", resetAll);
     tabReq.addEventListener("click", ()=>{ activeTab="req"; renderCode(); });
     tabRes.addEventListener("click", ()=>{ activeTab="res"; renderCode(); });
     btnCopy.addEventListener("click", async ()=>{ try{ await navigator.clipboard.writeText(codeArea.textContent||""); copyDone.classList.remove("hidden"); setTimeout(()=>copyDone.classList.add("hidden"),1200);}catch(_){}});
 
-    // policy edit toggle
     chkEdit.addEventListener("change", ()=>{ if(!chkEdit.checked) renderPolicy(); });
     btnApplyPolicy.addEventListener("click", applyPolicyTextareaToInputs);
 
-    // live reactions
     [inpMode, inpCount, inpFee, inpRiders, inpOps, inpCities, inpOpShare, inpCityShare, inpDistribution, inpMin, inpRound, inpMinCity, inpMinOp]
       .forEach(el => el.addEventListener("change", ()=>{ renderPolicy(); resetAll(); }));
 
