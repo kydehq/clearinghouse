@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN
 import random
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -55,14 +56,15 @@ class SettlePayload(BaseModel):
     end_time: Optional[datetime] = None
     community_id: Optional[str] = None
 
-# Realistischer PoC-Body
 class PocDemoPayload(BaseModel):
-    transaction_count: int = 500           # Anzahl Rides/Bookings im Stream
-    fee_per_transaction_eur: float = 0.30  # Zahlungsgebühr pro Auszahlung
-    scenario: str = "mixed"                # "scooter" | "car" | "mixed"
-    riders: int = 400                      # unterschiedliche Nutzer:innen
-    operators: int = 2                     # Anzahl Betreiber
-    cities: int = 1                        # Anzahl Kommunen
+    transaction_count: int = 500
+    # Backwards-compat optional fields
+    fee_per_transaction_eur: Optional[float] = None
+    scenario: Optional[str] = None
+    riders: Optional[int] = None
+    operators: Optional[int] = None
+    cities: Optional[int] = None
+    policy_body: Optional[Dict[str, Any]] = None
 
 # ---------- Startup ----------
 @app.on_event("startup")
@@ -82,7 +84,7 @@ def get_api_dashboard(request: Request):
 def get_poc_dashboard(request: Request):
     return templates.TemplateResponse("poc_dashboard.html", {"request": request})
 
-# ---------- API ----------
+# ---------- API (bestehend, unverändert bis hier) ----------
 @app.post("/v1/energy-events", status_code=201)
 def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_db)):
     try:
@@ -91,43 +93,27 @@ def ingest_energy_events(events: List[EventPayload], db: Session = Depends(get_d
         for ev in events:
             ext_id = ev.participant_id
             if ext_id not in existing:
-                p = Participant(
-                    external_id=ext_id,
-                    name=f"Participant {ext_id}",
-                    role=ParticipantRole.prosumer
-                )
-                db.add(p)
-                new_participants.append(p)
-                existing[ext_id] = p
-        if new_participants:
-            db.flush()
+                p = Participant(external_id=ext_id, name=f"Participant {ext_id}", role=ParticipantRole.prosumer)
+                db.add(p); new_participants.append(p); existing[ext_id] = p
+        if new_participants: db.flush()
         rows: list[UsageEvent] = []
         for ev in events:
             p = existing[ev.participant_id]
             rows.append(UsageEvent(
-                participant_id=p.id,
-                event_type=ev.event_type,
-                quantity=ev.quantity,
-                unit=ev.unit,
-                timestamp=ev.timestamp,
-                meta={"source": ev.source, "price_eur_per_kwh": ev.price_eur_per_kwh or 0.0}
+                participant_id=p.id, event_type=ev.event_type, quantity=ev.quantity, unit=ev.unit,
+                timestamp=ev.timestamp, meta={"source": ev.source, "price_eur_per_kwh": ev.price_eur_per_kwh or 0.0}
             ))
-        db.add_all(rows)
-        db.commit()
+        db.add_all(rows); db.commit()
         return {"status": "success", "message": f"Ingested {len(rows)} events."}
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        db.rollback(); raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/v1/netting/preview", response_class=JSONResponse)
 def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db)):
     try:
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
-        events = db.query(UsageEvent).filter(
-            UsageEvent.timestamp >= start,
-            UsageEvent.timestamp < end
-        ).all()
+        events = db.query(UsageEvent).filter(UsageEvent.timestamp >= start, UsageEvent.timestamp < end).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
         ids = [e.participant_id for e in events]
@@ -135,8 +121,7 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         balances = defaultdict(lambda: {"credit": 0.0, "debit": 0.0})
         for ev in events:
             p = participants.get(ev.participant_id)
-            if not p:
-                continue
+            if not p: continue
             qty = float(ev.quantity or 0.0)
             price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
             if ev.event_type.value in ("consumption", "base_fee"):
@@ -149,25 +134,19 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         content = {
             "stats": stats,
             "transfers": transfers,
-            "final_balances": {
-                participants[pid].external_id: round(val, 2)
-                for pid, val in final_balances.items() if abs(val) > 0.01
-            }
+            "final_balances": { participants[pid].external_id: round(val, 2)
+                                for pid, val in final_balances.items() if abs(val) > 0.01 }
         }
         return JSONResponse(content=content)
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback(); raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/v1/settle/execute", response_class=JSONResponse)
 def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
     try:
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
-        events = db.query(UsageEvent).filter(
-            UsageEvent.timestamp >= start,
-            UsageEvent.timestamp < end
-        ).all()
+        events = db.query(UsageEvent).filter(UsageEvent.timestamp >= start, UsageEvent.timestamp < end).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found to settle."})
         batch, result_data, _ = apply_policy_and_settle(
@@ -176,90 +155,144 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         pid_map = {p.id: p for p in db.query(Participant).filter(Participant.id.in_(result_data.keys())).all()}
         final_net = {pid_map[i].external_id: round(d["final_net"], 2) for i, d in result_data.items()}
         return JSONResponse(content={
-            "status": "success",
-            "batch_id": batch.id,
+            "status": "success", "batch_id": batch.id,
             "message": "Settlement executed and proofs generated.",
             "final_net_balances": final_net
         })
     except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback(); raise HTTPException(status_code=500, detail=str(e))
 
-# ---------- PoC Endpoint (realistisch) ----------
+# ---------- PoC Endpoint mit Policy-DSL ----------
+def _round_amt(x: float, mode: str) -> float:
+    d = Decimal(str(x))
+    if mode == "bankers":
+        return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
+    return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
 def _fare_for(mode: str, rng: random.Random) -> float:
-    if mode == "car":
-        return round(rng.uniform(8.0, 30.0), 2)
-    if mode == "scooter":
-        return round(rng.uniform(1.0, 5.0), 2)
+    if mode == "car": return round(rng.uniform(8.0, 30.0), 2)
+    if mode == "scooter": return round(rng.uniform(1.0, 5.0), 2)
     # mixed
     roll = rng.random()
-    if roll < 0.6:    # scooter
-        return round(rng.uniform(1.0, 5.0), 2)
-    elif roll < 0.9:  # car
-        return round(rng.uniform(8.0, 30.0), 2)
-    else:             # charge/misc
-        return round(rng.uniform(0.5, 3.0), 2)
+    if roll < 0.6: return round(rng.uniform(1.0, 5.0), 2)      # scooter
+    if roll < 0.9: return round(rng.uniform(8.0, 30.0), 2)     # car
+    return round(rng.uniform(0.5, 3.0), 2)                      # charge/misc
 
 @app.post("/v1/poc/run-demo")
 def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     """
-    Erzeugt viele unterschiedliche Rider (z.B. 400), verteilt die Transaktionen,
-    und rechnet am Ende typische Anteile an Betreiber/City zu.
-    -> Netted Payouts umfassen realistisch viele Empfänger:innen.
+    Policy-DSL (vereinfachtes Beispielformat):
+
+    {
+      "scenario": "mixed" | "scooter" | "car",
+      "fees": {"per_payout_eur": 0.30},
+      "actors": {"riders": 400, "operators": 20, "cities": 10},
+      "splits": {"operator_share": 0.90, "city_share": 0.10},
+      "thresholds": {"min_payout_eur": 1.00},
+      "rules": [
+        {"match":{"role":"city"}, "min_payout_eur":5.00},
+        {"match":{"role":"operator"}, "min_payout_eur":1.00},
+        {"match":{"role":"all"}, "round":"half_up"}  # oder "bankers"
+      ],
+      "optimize": {"distribution":"uniform" | "concentrated"}
+    }
     """
-    rng = random.Random(42)  # deterministisch für Demos
-    riders = [f"Rider-{i:03d}" for i in range(1, max(1, payload.riders) + 1)]
-    operators = [f"Operator-{chr(65+i)}" for i in range(max(1, payload.operators))]
-    cities = [f"City-{i+1}" for i in range(max(1, payload.cities))]
+    policy = payload.policy_body or {}
 
-    # Simulation
-    raw_transactions: List[Dict[str, Any]] = []
-    balances: Dict[str, float] = defaultdict(float)
+    scenario = (policy.get("scenario") or payload.scenario or "mixed").lower()
+    actors = policy.get("actors") or {}
+    riders_n = int(actors.get("riders") or payload.riders or 400)
+    ops_n = int(actors.get("operators") or payload.operators or 20)
+    cities_n = int(actors.get("cities") or payload.cities or 10)
+
+    splits = policy.get("splits") or {}
+    operator_share = float(splits.get("operator_share") or 0.90)
+    city_share = float(splits.get("city_share") or 0.10)
+
+    fees = policy.get("fees") or {}
+    fee_per_payout = float(fees.get("per_payout_eur") or payload.fee_per_transaction_eur or 0.30)
+
+    thresholds = policy.get("thresholds") or {}
+    min_payout_global = float(thresholds.get("min_payout_eur") or 0.0)
+
+    # rules
+    rules = policy.get("rules") or []
+    round_mode = "half_up"
+    min_city = min_payout_global
+    min_op = min_payout_global
+    for r in rules:
+        m = (r.get("match") or {})
+        if m.get("role") == "all" and r.get("round"):
+            round_mode = r["round"]
+        if m.get("role") == "city" and r.get("min_payout_eur") is not None:
+            min_city = float(r["min_payout_eur"])
+        if m.get("role") == "operator" and r.get("min_payout_eur") is not None:
+            min_op = float(r["min_payout_eur"])
+
+    optimize = policy.get("optimize") or {}
+    distribution = (optimize.get("distribution") or "uniform").lower()
+
+    # Simulation (deterministisch reproduzierbar)
+    rng = random.Random(42)
+    riders = [f"Rider-{i:04d}" for i in range(1, max(1, riders_n) + 1)]
+    operators = [f"Operator-{i+1}" for i in range(max(1, ops_n))]
+    cities = [f"City-{i+1}" for i in range(max(1, cities_n))]
+
+    # Gewichtete Auswahl (concentrated -> top 20% erhalten 80% der Rides)
+    def pick_weighted(lst: List[str], k_weight: float = 0.8) -> str:
+        if len(lst) <= 1: return lst[0]
+        if distribution == "concentrated":
+            top = max(1, int(len(lst) * 0.2))
+            if rng.random() < k_weight:
+                return lst[rng.randrange(top)]
+        return lst[rng.randrange(len(lst))]
+
     gross_volume = 0.0
+    raw_transactions: List[Dict[str, Any]] = []
 
-    # pro Transaktion: Rider zahlt Fahrpreis; Verteilung: Operator-Share, City-Share
-    # einfache Heuristik je Modus:
-    if payload.scenario == "car":
-        operator_share, city_share = 0.92, 0.08
-    elif payload.scenario == "scooter":
-        operator_share, city_share = 0.85, 0.15
-    else:  # mixed
-        operator_share, city_share = 0.9, 0.1
+    # Nur Empfänger saldieren (Operatoren/Städte). Rider sind Zahler (keine Payouts).
+    balances: Dict[str, float] = defaultdict(float)
 
     for _ in range(max(1, payload.transaction_count)):
         rider = rng.choice(riders)
-        fare = _fare_for(payload.scenario, rng)
-
-        # Rider zahlt (positiv)
-        balances[rider] += fare
+        fare = _fare_for(scenario, rng)
+        gross_volume += fare
         raw_transactions.append({"participant_id": rider, "amount": fare})
 
-        gross_volume += abs(fare)
+        op = pick_weighted(operators)
+        ct = pick_weighted(cities)
 
-    # Verteilen auf Operatoren / Cities (negativ = erhalten)
-    total_rider_sum = sum(v for k, v in balances.items() if k.startswith("Rider-"))
-    op_total = -(total_rider_sum * operator_share)
-    city_total = -(total_rider_sum * city_share)
+        balances[op] += -fare * operator_share   # empfangen (negativ = erhält)
+        balances[ct] += -fare * city_share
 
-    # auf mehrere Operatoren/Kommunen verteilen
-    for i, op in enumerate(operators):
-        share = op_total * ((i + 1) / sum(range(1, len(operators) + 1)))  # simple Gewichtung
-        balances[op] += share
-    for j, ct in enumerate(cities):
-        share = city_total * ((j + 1) / sum(range(1, len(cities) + 1)))
-        balances[ct] += share
+    # Runden & Schwellen anwenden je Rolle
+    def role_of(pid: str) -> str:
+        if pid.startswith("City-"): return "city"
+        if pid.startswith("Operator-"): return "operator"
+        return "other"
 
-    # Ergebnis zusammenstellen
-    netted_payouts = {pid: round(amt, 2) for pid, amt in balances.items() if abs(amt) > 0.01}
-    netted_transaction_count = len(netted_payouts)  # viele Empfänger:innen (Rider + Operator + City)
+    rounded: Dict[str, float] = {}
+    for pid, amt in balances.items():
+        role = role_of(pid)
+        amt_r = _round_amt(amt, round_mode)
+        thr = min_payout_global
+        if role == "city": thr = max(thr, min_city)
+        if role == "operator": thr = max(thr, min_op)
+        if abs(amt_r) < thr:
+            amt_r = 0.0
+        if abs(amt_r) >= 0.01:
+                rounded[pid] = amt_r
 
-    estimated_fees = payload.transaction_count * payload.fee_per_transaction_eur
-    actual_fees = netted_transaction_count * payload.fee_per_transaction_eur
+    netted_payouts = {pid: round(val, 2) for pid, val in rounded.items()}
+    netted_transaction_count = len(netted_payouts)
+
+    estimated_fees = payload.transaction_count * fee_per_payout
+    actual_fees = netted_transaction_count * fee_per_payout
     compression_ratio = round(payload.transaction_count / max(1, netted_transaction_count), 2)
 
     return {
         "before": {
-            "transaction_stream": raw_transactions[:50],  # kurzer Ausschnitt
+            "transaction_stream": raw_transactions[:50],
             "metrics": {
                 "total_transactions": payload.transaction_count,
                 "gross_volume_eur": round(gross_volume, 2),
@@ -278,14 +311,9 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
         "api_proof": {
             "request_body_snippet": {
                 "transaction_count": payload.transaction_count,
-                "fee_per_transaction_eur": payload.fee_per_transaction_eur,
-                "scenario": payload.scenario,
-                "riders": payload.riders,
-                "operators": payload.operators,
-                "cities": payload.cities
+                "policy_body": policy
             },
-            "response_body": {
-                "final_net_balances": netted_payouts
-            }
+            "response_body": { "final_net_balances": netted_payouts }
         }
     }
+
