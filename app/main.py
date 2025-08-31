@@ -185,7 +185,8 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         })
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail:str(e))
+        # FIX: detail=str(e) (vorher: detail:str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------- PoC Endpoint ----------
 def generate_dummy_escooter_events(count: int) -> list[dict]:
