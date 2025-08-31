@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from .db import ensure_min_schema, get_db
 from .models import Participant, ParticipantRole, UsageEvent, EventType
-from .settle import apply_policy_and_settle, apply_bilateral_netting
 from .audit import get_audit_payload
 
 # ---------- App / Templates ----------
