@@ -1,348 +1,133 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>KYDE – Mobility Sharing PoC</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    html, body { background:#fff; color:#0a0a0a; }
-    :focus-visible { outline:2px dashed #111; outline-offset:2px; }
-    .mono-icon { width:16px; height:16px; stroke:#111; fill:none; stroke-width:2; }
-    .tabnums { font-feature-settings:"tnum"; }
-  </style>
-</head>
-<body class="antialiased text-gray-900">
-  <!-- Header -->
-  <header class="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-200">
-    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
-      <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-1 text-xs uppercase tracking-wide">KYDE</span>
-      <span class="font-semibold tracking-tight">Clearinghouse PoC</span>
-      <span class="mx-3 h-4 w-px bg-gray-300 hidden sm:inline-block"></span>
-      <span class="text-sm text-gray-600 hidden md:inline">Von <strong>Chaos</strong> zu <strong>Finalität</strong> mit einem Klick</span>
-      <div class="ml-auto flex items-center gap-2">
-        <button id="btn-rerun" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">Neu starten</button>
-        <a href="/v1/poc/run-demo" target="_blank" class="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50">API öffnen</a>
-      </div>
-    </div>
-  </header>
+from __future__ import annotations
+from collections import defaultdict
+from typing import List, Dict, Any
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
 
-  <main class="mx-auto max-w-7xl p-4 md:p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- LEFT: Vorher -->
-    <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
-      <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-        <h2 class="font-semibold">1) Vorher — Viele Einzeltransaktionen</h2>
-        <span id="live-badge" class="rounded-full border border-gray-300 px-2.5 py-0.5 text-xs">live</span>
-      </div>
+from .models import SettlementBatch, SettlementLine, UsageEvent, Participant
+from app.utils.crypto import create_transaction_hash  # abs. Import, kein Zyklus
 
-      <div class="p-4 space-y-4">
-        <!-- Settings -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label class="block">
-            <span class="text-sm text-gray-700">Modus</span>
-            <select id="inp-mode" class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm">
-              <option value="scooter">Scooter Sharing</option>
-              <option value="car">Car Sharing</option>
-              <option value="mixed" selected>Mixed Mobility</option>
-            </select>
-          </label>
-          <label class="block">
-            <span class="text-sm text-gray-700">Transaktionen (heute)</span>
-            <input id="inp-count" type="number" min="50" max="20000" value="500"
-                   class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
-          </label>
-          <label class="block">
-            <span class="text-sm text-gray-700">Gebühr pro Zahlung (EUR)</span>
-            <input id="inp-fee" type="number" step="0.01" min="0" value="0.30"
-                   class="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"/>
-          </label>
-        </div>
+def human_readable_explanation(
+    participant: Participant,
+    events: List[UsageEvent],
+    final_amount: float,
+    use_case: str
+) -> str:
+    role_names = {
+        "tenant": "Mieter",
+        "commercial": "Gewerbemieter",
+        "landlord": "Vermieter",
+        "operator": "Betreiber",
+        "external_market": "Externer Markt",
+        "prosumer": "Prosumer",
+        "consumer": "Verbraucher",
+        "community_fee_collector": "Community Fee Collector",
+    }
+    role = role_names.get(getattr(participant.role, "value", participant.role), "Unbekannt")
 
-        <!-- KPIs -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div class="rounded-lg border border-gray-200 p-3">
-            <div class="text-xs text-gray-500">Einzeltransaktionen</div>
-            <div id="m-tx" class="mt-1 text-2xl font-semibold tabnums">0</div>
-          </div>
-          <div class="rounded-lg border border-gray-200 p-3">
-            <div class="text-xs text-gray-500">Umsatz gesamt</div>
-            <div id="m-gross" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
-          </div>
-          <div class="rounded-lg border border-gray-200 p-3">
-            <div class="text-xs text-gray-500">Gebühren vor Verrechnung</div>
-            <div id="m-estfees" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
-          </div>
-        </div>
+    if not events:
+        return f"{participant.name} ({role}) hat keine relevanten Events. Finalbetrag: {final_amount:.2f} EUR."
 
-        <!-- Live Stream -->
-        <div class="rounded-lg border border-gray-200">
-          <div class="p-3 border-b border-gray-200 text-sm text-gray-600 flex items-center justify-between">
-            <span>Live-Transaktionsstrom (stoppt bei Zielzahl)</span>
-            <span class="text-xs text-gray-500">max. 100 sichtbar</span>
-          </div>
-          <div class="h-[260px] overflow-auto">
-            <ul id="list-stream" class="p-3 space-y-2"></ul>
-          </div>
-        </div>
-      </div>
-    </section>
+    def _src(ev: UsageEvent) -> str:
+        return (ev.meta or {}).get("source", "").lower()
 
-    <!-- RIGHT: Nachher -->
-    <section class="rounded-xl border border-gray-200 bg-white shadow-sm">
-      <div class="p-4 border-b border-gray-200">
-        <h2 class="font-semibold">2) Nachher — Auszahlungen nach Verrechnung</h2>
-      </div>
+    consumption_local = sum(
+        float(e.quantity or 0.0)
+        for e in events
+        if e.event_type.value == "consumption" and _src(e) in ["local_pv", "battery", "local_battery"]
+    )
+    consumption_grid = sum(
+        float(e.quantity or 0.0)
+        for e in events
+        if e.event_type.value == "consumption" and _src(e) not in ["local_pv", "battery", "local_battery"]
+    )
+    generation = sum(
+        float(e.quantity or 0.0)
+        for e in events
+        if e.event_type.value in ["generation", "grid_feed"]
+    )
+    base_fee_total = sum(
+        float(e.quantity or 0.0)
+        for e in events
+        if e.event_type.value == "base_fee"
+    )
 
-      <div class="p-4 space-y-4">
-        <div class="flex items-center gap-3">
-          <button id="btn-run" class="inline-flex items-center rounded-lg border border-gray-900 bg-gray-900 text-white px-4 py-2 text-sm font-medium hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed">
-            ► Verrechnung starten
-          </button>
-          <span id="badge-savings" class="hidden rounded-full border border-gray-300 px-2.5 py-0.5 text-xs"></span>
-        </div>
+    parts = []
+    if consumption_local > 0:
+        parts.append(f"{consumption_local:.1f} kWh lokaler Strom")
+    if consumption_grid > 0:
+        parts.append(f"{consumption_grid:.1f} kWh Netzstrom")
+    if generation > 0:
+        parts.append(f"{generation:.1f} kWh erzeugt/eingespeist")
+    if base_fee_total > 0:
+        parts.append(f"{base_fee_total:.2f} EUR Grundgebühr")
 
-        <div class="rounded-lg border border-gray-200 p-4 space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div class="rounded-lg border border-gray-200 p-3">
-              <div class="text-xs text-gray-500">Anzahl Auszahlungen</div>
-              <div id="m-netted" class="mt-1 text-2xl font-semibold tabnums">0</div>
-            </div>
-            <div class="rounded-lg border border-gray-200 p-3">
-              <div class="text-xs text-gray-500">Gebühren heute</div>
-              <div id="m-actual" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
-            </div>
-            <div class="rounded-lg border border-gray-200 p-3">
-              <div class="text-xs text-gray-500">Ersparnis heute</div>
-              <div id="m-savings" class="mt-1 text-2xl font-semibold tabnums">€0,00</div>
-            </div>
-          </div>
+    summary = f"{participant.name} ({role}): " + (", ".join(parts) + ". " if parts else "Keine relevanten Aktivitäten. ")
+    if final_amount > 0:
+        summary += f"Zahlt {final_amount:.2f} EUR."
+    elif final_amount < 0:
+        summary += f"Erhält {abs(final_amount):.2f} EUR."
+    else:
+        summary += "Ausgeglichen (0 EUR)."
+    return summary
 
-          <!-- Kompression (simple Balken) -->
-          <div>
-            <div class="text-sm text-gray-600 mb-2">Kompression (Transaktionen → Auszahlungen)</div>
-            <div class="h-52 border border-gray-200 rounded-lg p-3 flex items-end gap-6">
-              <div class="flex-1 flex flex-col items-center justify-end">
-                <div id="bar-before" class="w-10 bg-gray-900 rounded-t" style="height: 10%;"></div>
-                <div class="mt-2 text-xs text-gray-600">Vorher</div>
-              </div>
-              <div class="flex-1 flex flex-col items-center justify-end">
-                <div id="bar-after" class="w-10 bg-gray-700 rounded-t" style="height: 5%;"></div>
-                <div class="mt-2 text-xs text-gray-600">Nachher</div>
-              </div>
-              <div class="flex-1 flex flex-col items-center justify-center text-center">
-                <div class="text-xs text-gray-500">Verhältnis</div>
-                <div id="lbl-ratio" class="mt-1 text-lg font-semibold tabnums">–</div>
-              </div>
-            </div>
-          </div>
+def get_audit_payload(db: Session, batch_id: int, explain: bool = False) -> Dict[str, Any]:
+    batch = db.query(SettlementBatch).filter(SettlementBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found.")
 
-          <!-- Netted payouts: Liste -->
-          <div id="wrap-payouts" class="hidden">
-            <div class="mb-2 text-sm text-gray-600 flex items-center justify-between">
-              <span>Auszahlungen (nach Verrechnung)</span>
-              <span id="lbl-payout-count" class="text-xs text-gray-500"></span>
-            </div>
-            <div class="h-56 overflow-auto rounded-lg border border-gray-200">
-              <ul id="list-payouts" class="divide-y divide-gray-200"></ul>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+    lines = db.query(SettlementLine).filter(SettlementLine.batch_id == batch_id).all()
 
-    <!-- BOTTOM: API Proof -->
-    <section class="rounded-xl border border-gray-200 bg-white shadow-sm lg:col-span-2">
-      <div class="p-4 border-b border-gray-200">
-        <h2 class="font-semibold">3) API-Beweis — Echter Request &amp; Response</h2>
-      </div>
-      <div class="p-4 space-y-3">
-        <div class="flex items-center gap-2">
-          <button id="tab-req" class="rounded border border-gray-300 px-3 py-1.5 text-sm bg-gray-900 text-white">Request</button>
-          <button id="tab-res" class="rounded border border-gray-300 px-3 py-1.5 text-sm">Response</button>
-          <div class="ml-auto flex items-center gap-2">
-            <button id="btn-copy" class="rounded border border-gray-300 px-3 py-1.5 text-sm">Copy</button>
-            <span id="copy-done" class="text-xs text-gray-500 hidden">Kopiert</span>
-          </div>
-        </div>
-        <div class="rounded-lg border border-gray-200 bg-gray-50">
-          <pre class="overflow-auto p-4 text-xs leading-relaxed"><code id="code-area">// Starte die Demo, um Request & Response zu sehen</code></pre>
-        </div>
-      </div>
-    </section>
-  </main>
+    # Halb-offenes Intervall wie im Settlement (>= start, < end), um Doppelzählungen zu vermeiden
+    relevant_events = db.query(UsageEvent).filter(
+        UsageEvent.timestamp >= batch.start_time,
+        UsageEvent.timestamp < batch.end_time
+    ).all()
 
-  <script>
-    // ===== Helpers =====
-    const fmtEUR = new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR",maximumFractionDigits:2});
-    const $ = (s)=>document.querySelector(s);
+    all_participants = {p.id: p for p in db.query(Participant).all()}
 
-    // UI refs
-    const list = $("#list-stream");
-    const mTx = $("#m-tx"); const mGross=$("#m-gross"); const mEst=$("#m-estfees");
-    const liveBadge=$("#live-badge"); const btnRun=$("#btn-run"); const btnRerun=$("#btn-rerun");
-    const inpCount=$("#inp-count"); const inpFee=$("#inp-fee"); const inpMode=$("#inp-mode");
+    events_by_participant: Dict[int, List[UsageEvent]] = defaultdict(list)
+    for ev in relevant_events:
+        events_by_participant[ev.participant_id].append(ev)
 
-    const mNetted=$("#m-netted"); const mActual=$("#m-actual"); const mSavings=$("#m-savings");
-    const badgeSavings=$("#badge-savings"); const barBefore=$("#bar-before"); const barAfter=$("#bar-after");
-    const lblRatio=$("#lbl-ratio"); const wrapPayouts=$("#wrap-payouts"); const listPayouts=$("#list-payouts"); const lblPayoutCount=$("#lbl-payout-count");
-
-    const tabReq=$("#tab-req"); const tabRes=$("#tab-res"); const codeArea=$("#code-area");
-    const btnCopy=$("#btn-copy"); const copyDone=$("#copy-done");
-
-    // State
-    let streaming=true, timer=null, idCounter=0, txCount=0, gross=0, estFees=0;
-    let lastRequest=null, lastResponse=null, activeTab="req";
-
-    // icon svgs (monochrom)
-    const ICONS = {
-      scooter:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm14 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="M7 17h7l4-10h-3"/></svg>`,
-      car:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M3 12h18l-2-5a2 2 0 0 0-2-1H7a2 2 0 0 0-2 1l-2 5Z"/><path d="M5 12v6M19 12v6"/><circle cx="7" cy="18" r="1.5"/><circle cx="17" cy="18" r="1.5"/></svg>`,
-      charge:`<svg class="mono-icon" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8Z"/></svg>`
-    };
-
-    function randName(rng, n){ return "Rider-"+String(1+Math.floor(rng()*n)).padStart(3,"0"); }
-
-    function startStream(){
-      stopStream();
-      streaming=true; liveBadge.textContent="live";
-      const target = parseInt(inpCount.value||"0",10);
-      const mode = inpMode.value; // scooter|car|mixed
-      const rng = Math.random.bind(Math);
-
-      timer = setInterval(()=>{
-        if(txCount >= target){ stopStream(); return; }
-
-        // pick type by mode
-        let t="scooter";
-        if(mode==="car") t="car";
-        else if(mode==="mixed") t = Math.random() < 0.6 ? "scooter" : (Math.random()<0.8 ? "car" : "charge");
-
-        const p = randName(rng, Math.min(target*0.8, 1000)); // viele verschiedene Rider
-        let amt = t==="car" ? +(8+Math.random()*22).toFixed(2) : +(1+Math.random()*4).toFixed(2);
-        if(t==="charge") amt = +(0.5+Math.random()*2.5).toFixed(2);
-
-        idCounter += 1;
-        const li=document.createElement("li");
-        li.className="flex items-center justify-between rounded border border-gray-200 px-3 py-2 text-sm";
-        li.innerHTML = `<span class="flex items-center gap-2">${ICONS[t]}<span class="font-medium">${p}</span></span><span class="tabnums">${fmtEUR.format(amt)}</span>`;
-        list.prepend(li);
-        while(list.children.length>100) list.removeChild(list.lastChild);
-
-        txCount += 1;
-        gross = +(gross + Math.abs(amt)).toFixed(2);
-        estFees = +(estFees + parseFloat(inpFee.value||"0")).toFixed(2);
-        renderBefore(target);
-      }, 80);
+    payload: Dict[str, Any] = {
+        "batch_id": batch.id,
+        "use_case": batch.use_case,
+        "created_at": batch.created_at.isoformat(),
+        "start_time": batch.start_time.isoformat(),
+        "end_time": batch.end_time.isoformat(),
+        "settlement_lines": []
     }
 
-    function stopStream(){
-      streaming=false; liveBadge.textContent="paused";
-      if(timer){ clearInterval(timer); timer=null; }
-    }
+    for line in lines:
+        base = {
+            "batch_id": line.batch_id,
+            "participant_id": line.participant_id,
+            "amount_eur": float(line.amount_eur),
+            "description": line.description,
+        }
+        recreated = create_transaction_hash(base)
 
-    function renderBefore(target){
-      mTx.textContent = String(txCount);
-      mGross.textContent = fmtEUR.format(gross);
-      mEst.textContent = fmtEUR.format(estFees);
-      // Update bar "before" height live
-      const maxTx = Math.max(1, target);
-      const beforeH = Math.max(6, Math.min(100, Math.round((txCount / maxTx) * 100)));
-      barBefore.style.height = beforeH + "%";
-    }
+        participant = all_participants.get(line.participant_id)
+        line_obj: Dict[str, Any] = {
+            "line_id": line.id,
+            "participant_id": line.participant_id,
+            "participant_name": participant.name if participant else "Unbekannt",
+            "participant_role": (participant.role.value if participant and hasattr(participant.role, "value") else "Unbekannt"),
+            "amount_eur": float(line.amount_eur),
+            "description": line.description,
+            "proof_hash": line.proof_hash,
+            "is_verified": (recreated == line.proof_hash),
+        }
 
-    function resetAll(){
-      stopStream();
-      list.innerHTML=""; idCounter=0; txCount=0; gross=0; estFees=0;
-      mTx.textContent="0"; mGross.textContent="€0,00"; mEst.textContent="€0,00";
-      barBefore.style.height="10%"; barAfter.style.height="5%"; lblRatio.textContent="–";
-      listPayouts.innerHTML=""; wrapPayouts.classList.add("hidden"); lblPayoutCount.textContent="";
-      badgeSavings.classList.add("hidden"); mNetted.textContent="0"; mActual.textContent="€0,00"; mSavings.textContent="€0,00";
-      lastRequest=null; lastResponse=null; activeTab="req"; renderCode();
-      btnRun.disabled=false; startStream();
-    }
+        if explain and participant:
+            line_obj["human_readable_explanation"] = human_readable_explanation(
+                participant,
+                events_by_participant.get(line.participant_id, []),
+                float(line.amount_eur),
+                batch.use_case
+            )
 
-    // API Proof
-    function renderCode(){
-      if(activeTab==="req"){
-        codeArea.textContent = lastRequest ? JSON.stringify(lastRequest,null,2) : "// Starte die Demo, um Request & Response zu sehen";
-        tabReq.classList.add("bg-gray-900","text-white"); tabRes.classList.remove("bg-gray-900","text-white");
-      }else{
-        codeArea.textContent = lastResponse ? JSON.stringify(lastResponse,null,2) : "// Noch keine Response – bitte Demo ausführen";
-        tabRes.classList.add("bg-gray-900","text-white"); tabReq.classList.remove("bg-gray-900","text-white");
-      }
-    }
+        payload["settlement_lines"].append(line_obj)
 
-    function renderAfter(resp){
-      const after=resp.after;
-      mNetted.textContent = String(after.metrics.netted_transactions);
-      mActual.textContent = fmtEUR.format(after.metrics.actual_fees_eur);
-      mSavings.textContent = fmtEUR.format(after.metrics.savings_eur);
-      badgeSavings.textContent = "Ersparnis " + fmtEUR.format(after.metrics.savings_eur);
-      badgeSavings.classList.remove("hidden");
-
-      const beforeTx = txCount;
-      const afterTx  = after.metrics.netted_transactions||0;
-      const maxTx = Math.max(1,beforeTx);
-      const beforeH = Math.max(6,Math.min(100,Math.round((beforeTx/maxTx)*100)));
-      const afterH  = Math.max(2,Math.min(100,Math.round((afterTx/maxTx)*100)));
-      barBefore.style.height = beforeH+"%"; barAfter.style.height = afterH+"%";
-      const ratio = after.metrics.compression_ratio || (beforeTx && afterTx ? (beforeTx/afterTx).toFixed(2) : "–");
-      lblRatio.textContent = ratio+"×";
-
-      // Payout-Liste
-      listPayouts.innerHTML="";
-      const entries = Object.entries(after.netted_payouts)
-        .map(([pid, amt]) => ({pid, amt: Number(amt)}))
-        .sort((a,b)=>Math.abs(b.amt)-Math.abs(a.amt)); // größte Beträge oben
-      entries.forEach(({pid, amt})=>{
-        const li=document.createElement("li");
-        li.className="flex items-center justify-between px-3 py-2";
-        const sign = amt<0 ? "-" : "";
-        li.innerHTML = `<span class="font-medium">${pid}</span><span class="tabnums">${sign}${fmtEUR.format(Math.abs(amt))}</span>`;
-        listPayouts.appendChild(li);
-      });
-      lblPayoutCount.textContent = entries.length+" Empfänger:innen";
-      if(entries.length>0) wrapPayouts.classList.remove("hidden");
-    }
-
-    // Events
-    btnRun.addEventListener("click", async ()=>{
-      stopStream();
-      btnRun.disabled = true;
-      const body = {
-        transaction_count: txCount, // exakt so viele, wie gestreamt wurden
-        fee_per_transaction_eur: parseFloat(inpFee.value||"0"),
-        scenario: inpMode.value,    // scooter | car | mixed
-        riders: Math.max(50, Math.floor(parseInt(inpCount.value||"0",10)*0.8)), // viele verschiedene Nutzer:innen
-        operators: 2,
-        cities: 1
-      };
-      lastRequest = body; activeTab="req"; renderCode();
-
-      try{
-        const res = await fetch("/v1/poc/run-demo", {
-          method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
-        });
-        if(!res.ok) throw new Error("HTTP "+res.status);
-        const data = await res.json();
-        lastResponse = data; renderAfter(data); activeTab="res"; renderCode();
-      }catch(err){ alert("Fehler: "+(err?.message||err)); btnRun.disabled=false; startStream(); }
-    });
-
-    btnRerun.addEventListener("click", resetAll);
-    tabReq.addEventListener("click", ()=>{ activeTab="req"; renderCode(); });
-    tabRes.addEventListener("click", ()=>{ activeTab="res"; renderCode(); });
-    btnCopy.addEventListener("click", async ()=>{
-      try{ await navigator.clipboard.writeText(codeArea.textContent||""); copyDone.classList.remove("hidden"); setTimeout(()=>copyDone.classList.add("hidden"),1200);}catch(_){}
-    });
-
-    // live react to input changes
-    inpCount.addEventListener("change", resetAll);
-    inpMode.addEventListener("change", resetAll);
-    inpFee.addEventListener("change", ()=>{ /* Gebühren ändern on-the-fly */ });
-
-    // Init
-    resetAll();
-  </script>
-</body>
-</html>
+    return payload
