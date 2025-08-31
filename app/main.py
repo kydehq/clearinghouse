@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN
 import random
+import os
 
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -67,9 +68,20 @@ class PocDemoPayload(BaseModel):
     policy_body: Optional[Dict[str, Any]] = None
 
 # ---------- Startup ----------
+
 @app.on_event("startup")
 def on_startup():
-    ensure_min_schema()
+    # Für Demos: mit KYDE_SKIP_DB_INIT=1 DB-Migration überspringen
+    try:
+        if os.getenv("KYDE_SKIP_DB_INIT", "0") == "1":
+            print("[startup] Skipping DB init due to KYDE_SKIP_DB_INIT=1")
+            return
+        ensure_min_schema()
+    except Exception as e:
+        # Nicht blockieren – lieber starten und Demo-Routen verfügbar machen
+        print(f"[startup] DB init failed or skipped: {e}")
+
+
 
 # ---------- Routes (HTML) ----------
 @app.get("/", response_class=HTMLResponse)
@@ -179,7 +191,7 @@ def _fare_for(mode: str, rng: random.Random) -> float:
     return round(rng.uniform(0.5, 3.0), 2)                      # charge/misc
 
 @app.post("/v1/poc/run-demo")
-def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
+def run_poc_demo(payload: PocDemoPayload):
     """
     Policy-DSL (vereinfacht):
 
