@@ -182,3 +182,59 @@ def audit_batch(batch_id: int, explain: bool = False, db: Session = Depends(get_
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+// In main.py hinzufügen
+
+class PocDemoPayload(BaseModel):
+    # Du kannst hier Parameter übergeben, z.B. Anzahl der Transaktionen
+    transaction_count: int = 500
+    fee_per_transaction_eur: float = 0.30 # Annahme für die "Vorher"-Berechnung
+
+@app.post("/v1/poc/run-demo")
+def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
+    # 1. Simuliere die "Vorher"-Situation
+    # Dies sind nur Berechnungen für die Visualisierung, keine echten Transaktionen
+    raw_transactions = generate_dummy_escooter_events(payload.transaction_count) # Eine neue Helper-Funktion
+    gross_volume = sum(t['amount'] for t in raw_transactions)
+    estimated_fees = payload.transaction_count * payload.fee_per_transaction_eur
+
+    # 2. Führe die "Nachher"-Logik aus (deine bestehende Logik!)
+    # Hier könntest du die Events tatsächlich in die DB schreiben und dann `apply_policy_and_settle` aufrufen
+    # Für eine schnelle Demo können wir es auch direkt simulieren:
+    
+    # Annahme: Deine Netting-Logik reduziert 500 Transaktionen auf 80 Payouts
+    # In einer echten Demo rufst du hier deine `apply_bilateral_netting` Funktion auf
+    balances = defaultdict(float)
+    for t in raw_transactions:
+        balances[t['participant_id']] += t['amount']
+    
+    netted_payouts = {pid: amount for pid, amount in balances.items()}
+    netted_transaction_count = len(netted_payouts)
+    actual_fees = netted_transaction_count * payload.fee_per_transaction_eur
+
+    # 3. Gib alles in einer sauberen Struktur zurück
+    return {
+        "before": {
+            "transaction_stream": raw_transactions[:20], # Nur ein paar Beispiele für die Anzeige
+            "metrics": {
+                "total_transactions": payload.transaction_count,
+                "gross_volume_eur": gross_volume,
+                "estimated_fees_eur": estimated_fees
+            }
+        },
+        "after": {
+            "netted_payouts": netted_payouts,
+             "metrics": {
+                "netted_transactions": netted_transaction_count,
+                "actual_fees_eur": actual_fees,
+                "savings_eur": estimated_fees - actual_fees
+            }
+        },
+        "api_proof": {
+            "request_body_snippet": {"events": raw_transactions[:2]}, # Beispiel-Request
+            "response_body": {"batch_id": 123, "final_net_balances": netted_payouts} # Beispiel-Response
+        }
+    }
+
+# Du müsstest noch eine Helper-Funktion `generate_dummy_escooter_events` erstellen

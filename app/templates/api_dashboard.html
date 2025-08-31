@@ -1,226 +1,59 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API-Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>KYDE Clearinghouse - PoC</title>
     <style>
-        body { font-family: system-ui, sans-serif; background-color: #f6f7f9; color: #0f172a; }
-        .card { background-color: #fff; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0,0,0,.06); padding: 1.5rem; }
-        pre { background-color: #f3f4f6; padding: 1rem; border-radius: 0.5rem; white-space: pre-wrap; word-wrap: break-word; font-size: 0.875rem; }
-        .btn { padding: 0.75rem 1.25rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: background-color 0.2s; }
-        .btn-primary { background-color: #1a202c; color: #fff; }
-        .btn-primary:hover { background-color: #2d3748; }
-        .btn-secondary { background-color: #edf2f7; color: #4a5568; }
-        .btn-secondary:hover { background-color: #e2e8f0; }
-        .flex-container { display: flex; gap: 1rem; }
-        .flex-item { flex: 1; }
-        textarea { width: 100%; border-radius: 0.5rem; padding: 0.5rem; border: 1px solid #e2e8f0; }
-        .input-group { display: flex; gap: 0.5rem; }
-        .input-group input { flex: 1; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem; }
+        /* ... Zusätzliche Styles für Animationen etc. ... */
+        .metric-value { font-size: 2rem; font-weight: 700; }
+        .highlight-green { color: #10b981; }
+        .highlight-red { color: #ef4444; }
     </style>
 </head>
-<body class="p-8">
-    <div class="max-w-7xl mx-auto space-y-8">
-        <div class="card">
-            <div class="flex justify-between items-center mb-4">
-                <h1 class="text-3xl font-bold">API-Dashboard (Tag 4 Demo)</h1>
-                <a href="/" class="btn btn-secondary">← Zurück</a>
-            </div>
-            <p class="text-gray-600">
-                Führe die API-Calls aus, um die Kernfunktionalität zu demonstrieren. Die JSON-Antworten werden unten angezeigt.
-            </p>
-        </div>
-
-        <div class="card space-y-6">
-            <h2 class="text-xl font-semibold">1. Events Ingestieren</h2>
-            <p class="text-gray-600">Sende simulierte Energie-Events an den <code>/v1/energy-events</code> Endpunkt.</p>
-            <button onclick="sendEvents()" class="btn btn-primary">Events senden</button>
-            <pre id="response-events" class="mt-4"></pre>
-        </div>
-
-        <div class="card space-y-6">
-            <h2 class="text-xl font-semibold">2. Policy-Aware Netting Preview</h2>
-            <p class="text-gray-600">Passe die Policy an und frage den optimierten Zahlungsplan ab.</p>
-            <label for="policy-input" class="block text-sm font-medium text-gray-700">Policy (JSON):</label>
-            <textarea id="policy-input" rows="8" class="font-mono">
-{
-  "use_case": "mieterstrom",
-  "min_payment_threshold_eur": 0.0,
-  "local_pv_price_eur_kwh": 0.25,
-  "feed_in_price_eur_kwh": 0.08,
-  "vpp_sale_price_eur_kwh": 0.10
-}
-            </textarea>
-            <button onclick="getNettingPreview()" class="btn btn-primary">Netting Preview abfragen</button>
-            <pre id="response-netting" class="mt-4"></pre>
-        </div>
-
-        <div class="card space-y-6">
-            <h2 class="text-xl font-semibold">3. Finalität auslösen</h2>
-            <p class="text-gray-600">Löse die Abrechnung aus. Die Plattform generiert nun unveränderliche Belege.</p>
-            <button onclick="executeSettlement()" class="btn btn-primary">Abrechnung ausführen</button>
-            <pre id="response-settle" class="mt-4"></pre>
-        </div>
-
-        <div class="card space-y-6">
-            <h2 class="text-xl font-semibold">4. Finalität verifizieren (Audit)</h2>
-            <p class="text-gray-600">Überprüfe die Unveränderlichkeit der Transaktion mit dem Proof Layer.</p>
-            <div class="input-group">
-                <input type="number" id="audit-batch-id" placeholder="Batch-ID eingeben" class="w-full">
-                <button onclick="auditSettlement()" class="btn btn-primary">Audit starten</button>
-            </div>
+<body class="p-8 bg-gray-100">
+    <div class="max-w-7xl mx-auto space-y-6">
+        <h1 class="text-4xl font-bold text-center">The "Magic Moment" of Netting</h1>
         
-            <div class="flex items-center mt-2 space-x-2">
-                <input id="explain-checkbox" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded">
-                <label for="explain-checkbox" class="text-sm text-gray-700">Erklärung anzeigen</label>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+            <div id="before-view" class="card space-y-4">
+                <h2 class="text-2xl font-semibold">1. The Problem: Unsettled Chaos</h2>
+                <div id="transaction-stream" class="h-48 overflow-y-auto p-2 bg-gray-50 rounded">
+                    </div>
+                <div class="space-y-2 pt-4">
+                    <p>Total Transactions: <span id="before-tx-count" class="metric-value">0</span></p>
+                    <p>Estimated Fees: <span id="before-fees" class="metric-value highlight-red">€0.00</span></p>
+                </div>
             </div>
-            <pre id="response-audit" class="mt-4"></pre>
+
+            <div id="after-view" class="card space-y-4 opacity-0 transition-opacity duration-1000">
+                <h2 class="text-2xl font-semibold">2. The Solution: Netted & Settled</h2>
+                <div id="payout-list" class="h-48 overflow-y-auto p-2 bg-gray-50 rounded">
+                    </div>
+                 <div class="space-y-2 pt-4">
+                    <p>Netted Payouts: <span id="after-tx-count" class="metric-value">0</span></p>
+                    <p>Actual Fees: <span id="after-fees" class="metric-value highlight-green">€0.00</span></p>
+                    <p class="text-xl font-bold">Daily Savings: <span id="savings" class="metric-value highlight-green">€0.00</span></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center">
+            <button id="run-netting-btn" class="btn btn-primary text-xl">► Run Daily Netting</button>
+        </div>
+
+        <div id="api-proof" class="card flex-container opacity-0 transition-opacity duration-1000">
+            <div class="flex-item">
+                <h3 class="text-lg font-semibold">API Request (Snippet)</h3>
+                <pre id="api-request"></pre>
+            </div>
+            <div class="flex-item">
+                <h3 class="text-lg font-semibold">API Response</h3>
+                <pre id="api-response"></pre>
+            </div>
         </div>
     </div>
 
     <script>
-        const BASE_URL = window.location.origin;
-
-        const eventsPayload = [
-            {
-                "participant_id": "machine-1",
-                "event_type": "consumption",
-                "quantity": 5.2,
-                "unit": "kWh",
-                "timestamp": new Date().toISOString(),
-                "source": "local_pv",
-                "price_eur_per_kwh": 0.25
-            },
-            {
-                "participant_id": "machine-2",
-                "event_type": "generation",
-                "quantity": 3.8,
-                "unit": "kWh",
-                "timestamp": new Date().toISOString(),
-                "source": "solar_panel",
-                "price_eur_per_kwh": 0.25
-            },
-            {
-                "participant_id": "machine-1",
-                "event_type": "consumption",
-                "quantity": 10.0,
-                "unit": "kWh",
-                "timestamp": new Date().toISOString(),
-                "source": "grid_external",
-                "price_eur_per_kwh": 0.35
-            },
-            {
-                "participant_id": "machine-2",
-                "event_type": "consumption",
-                "quantity": 2.0,
-                "unit": "kWh",
-                "timestamp": new Date().toISOString(),
-                "source": "grid_external",
-                "price_eur_per_kwh": 0.35
-            },
-        ];
-        
-        let latestBatchId = null;
-
-        async function sendEvents() {
-            const responseElement = document.getElementById('response-events');
-            responseElement.textContent = 'Sende Events...';
-            try {
-                const response = await fetch(`${BASE_URL}/v1/energy-events`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(eventsPayload)
-                });
-                const data = await response.json();
-                responseElement.textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                responseElement.textContent = 'Fehler: ' + error.message;
-            }
-        }
-
-        async function getNettingPreview() {
-            const responseElement = document.getElementById('response-netting');
-            responseElement.textContent = 'Frage Netting Preview ab...';
-            try {
-                const policyInput = document.getElementById('policy-input').value;
-                const policyBody = JSON.parse(policyInput);
-                
-                const nettingPayload = {
-                    "use_case": policyBody.use_case,
-                    "policy_body": policyBody,
-                    "start_time": new Date(Date.now() - 86400000 * 2).toISOString(),
-                    "end_time": new Date().toISOString()
-                };
-
-                const response = await fetch(`${BASE_URL}/v1/netting/preview`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(nettingPayload)
-                });
-                const data = await response.json();
-                responseElement.textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                responseElement.textContent = 'Fehler: ' + error.message;
-            }
-        }
-
-        async function executeSettlement() {
-            const responseElement = document.getElementById('response-settle');
-            responseElement.textContent = 'Führe Abrechnung aus...';
-            try {
-                const policyInput = document.getElementById('policy-input').value;
-                const policyBody = JSON.parse(policyInput);
-                const currentTime = new Date();
-                const startTime = new Date(currentTime.getTime() - 86400000 * 2);
-
-                const settlePayload = {
-                    "use_case": policyBody.use_case,
-                    "policy_body": policyBody,
-                    "start_time": startTime.toISOString(),
-                    "end_time": currentTime.toISOString()
-                };
-                const response = await fetch(`${BASE_URL}/v1/settle/execute`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settlePayload)
-                });
-                const data = await response.json();
-                
-                latestBatchId = data.batch_id;
-                document.getElementById('audit-batch-id').value = latestBatchId;
-
-                responseElement.textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                responseElement.textContent = 'Fehler: ' + error.message;
-            }
-        }
-
-        async function auditSettlement() {
-            const responseElement = document.getElementById('response-audit');
-            const batchId = document.getElementById('audit-batch-id').value;
-            const explainCheckbox = document.getElementById('explain-checkbox');
-
-            if (!batchId) {
-                responseElement.textContent = 'Bitte eine Batch-ID eingeben.';
-                return;
-            }
-            responseElement.textContent = 'Starte Audit...';
-            try {
-                let url = `${BASE_URL}/v1/audit/${batchId}`;
-                
-                if (explainCheckbox.checked) {
-                    url += "?explain=true";
-                }
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                responseElement.textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                responseElement.textContent = 'Fehler: ' + error.message;
-            }
-        }
+        // ... (JavaScript-Logik siehe unten) ...
     </script>
 </body>
 </html>
