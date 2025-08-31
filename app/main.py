@@ -22,9 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR.parent / "static"
 
-app = FastAPI(title="KYDE PoC", debug=True)
+app = FastAPI(title="KYDE PoC", debug=False)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# ---------- Health ----------
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 # ---------- Pydantic Schemas ----------
 class EventPayload(BaseModel):
@@ -114,7 +119,10 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
 
-        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
+        events = db.query(UsageEvent).filter(
+            UsageEvent.timestamp >= start,
+            UsageEvent.timestamp < end
+        ).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found in the specified timeframe."})
 
@@ -129,9 +137,12 @@ def netting_preview(payload: NettingPreviewPayload, db: Session = Depends(get_db
             qty = float(ev.quantity or 0.0)
             price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
             if ev.event_type.value in ("consumption", "base_fee"):
-                balances[p.id]["debit"] += qty * price
+                # base_fee als EUR
+                amount = qty if (ev.unit or "").lower() in ("eur", "") else qty * price
+                balances[p.id]["debit"] += amount
             elif ev.event_type.value in ("generation", "grid_feed", "vpp_sale"):
-                balances[p.id]["credit"] += qty * price
+                amount = qty if (ev.unit or "").lower() == "eur" else qty * price
+                balances[p.id]["credit"] += amount
 
         final_balances, stats, transfers = apply_bilateral_netting(balances, payload.policy_body)
         content = {
@@ -153,7 +164,10 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         start = payload.start_time or (datetime.utcnow() - timedelta(days=2))
         end = payload.end_time or datetime.utcnow()
 
-        events = db.query(UsageEvent).filter(UsageEvent.timestamp.between(start, end)).all()
+        events = db.query(UsageEvent).filter(
+            UsageEvent.timestamp >= start,
+            UsageEvent.timestamp < end
+        ).all()
         if not events:
             return JSONResponse(status_code=200, content={"message": "No events found to settle."})
 
@@ -171,26 +185,15 @@ def execute_settlement(payload: SettlePayload, db: Session = Depends(get_db)):
         })
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail:str(e))
 
-@app.get("/v1/audit/{batch_id}", response_class=JSONResponse)
-def audit_batch(batch_id: int, explain: bool = False, db: Session = Depends(get_db)):
-    try:
-        return JSONResponse(content=get_audit_payload(db, batch_id, explain))
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ---------- Neuer PoC-Endpunkt ----------
+# ---------- PoC Endpoint ----------
 def generate_dummy_escooter_events(count: int) -> list[dict]:
     participants = ["Alice", "Bob", "Clara", "Operator-X", "City-Y", "Provider-Z"]
     events = []
     for _ in range(count):
         p = random.choice(participants)
         amount = round(random.uniform(0.5, 5.0), 2)
-        # Betreiber/Stadt/Provider eher Auszahlung
         if "Operator" in p or "City" in p or "Provider" in p:
             amount = -amount
         events.append({"participant_id": p, "amount": amount})
@@ -214,6 +217,7 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
     netted_payouts = {pid: round(amount, 2) for pid, amount in balances.items() if abs(amount) > 0.01}
     netted_transaction_count = len(netted_payouts)
     actual_fees = netted_transaction_count * payload.fee_per_transaction_eur
+    compression_ratio = round(payload.transaction_count / max(1, netted_transaction_count), 2)
 
     return {
         "before": {
@@ -229,7 +233,8 @@ def run_poc_demo(payload: PocDemoPayload, db: Session = Depends(get_db)):
             "metrics": {
                 "netted_transactions": netted_transaction_count,
                 "actual_fees_eur": round(actual_fees, 2),
-                "savings_eur": round(estimated_fees - actual_fees, 2)
+                "savings_eur": round(estimated_fees - actual_fees, 2),
+                "compression_ratio": compression_ratio
             }
         },
         "api_proof": {

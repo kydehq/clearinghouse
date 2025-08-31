@@ -5,8 +5,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .models import SettlementBatch, SettlementLine, UsageEvent, Participant
+from .utils.crypto import create_transaction_hash
 
-# Menschenlesbare Erklärung je Teilnehmer
 def human_readable_explanation(participant, events: List[UsageEvent], final_amount: float, use_case: str) -> str:
     role_names = {
         "tenant": "Mieter", "commercial": "Gewerbemieter", "landlord": "Vermieter",
@@ -40,9 +40,6 @@ def human_readable_explanation(participant, events: List[UsageEvent], final_amou
     return summary
 
 def get_audit_payload(db: Session, batch_id: int, explain: bool = False):
-    # Lazy import vermeidet Zyklen
-    from .utils.crypto import create_transaction_hash
-
     batch = db.query(SettlementBatch).filter(SettlementBatch.id == batch_id).first()
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")

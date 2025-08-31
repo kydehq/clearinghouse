@@ -2,39 +2,34 @@ from __future__ import annotations
 from typing import Dict, Tuple, List, Any
 from collections import defaultdict
 from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from .models import UsageEvent, SettlementBatch, SettlementLine
 from .utils.crypto import create_transaction_hash
 
-# Typen:
 # balances = { pid: {"credit": float, "debit": float} }
-# final_balances = { pid: float }  # >0 = zahlt (debit - credit), <0 = erhält
+# final_net = { pid: float }  # >0 = zahlt, <0 = erhält
 
 def _compute_final_balances(balances: Dict[int, Dict[str, float]]) -> Dict[int, float]:
     final_net: Dict[int, float] = {}
     for pid, bd in balances.items():
         debit = float(bd.get("debit", 0.0))
         credit = float(bd.get("credit", 0.0))
-        final_net[pid] = round(debit - credit, 10)  # positiv = zahlt
+        final_net[pid] = round(debit - credit, 10)
     return final_net
 
 def apply_bilateral_netting(
     balances: Dict[int, Dict[str, float]],
     policy_body: Dict[str, Any] | None = None
 ) -> Tuple[Dict[int, float], Dict[str, Any], List[Dict[str, Any]]]:
-    """
-    Simpler bilateraler Netting-Algorithmus:
-    - final_net = debit - credit
-    - Schuldner (final_net>0) zahlen Gläubiger (final_net<0) im Greedy-Verfahren aus.
-    """
     final_net = _compute_final_balances(balances)
+
     debtors: List[Tuple[int, float]] = [(pid, amt) for pid, amt in final_net.items() if amt > 0.0001]
     creditors: List[Tuple[int, float]] = [(pid, -amt) for pid, amt in final_net.items() if amt < -0.0001]
 
-    debtors.sort(key=lambda x: x[1], reverse=True)     # große Schulden zuerst
-    creditors.sort(key=lambda x: x[1], reverse=True)   # große Forderungen zuerst
+    # deterministisch
+    debtors.sort(key=lambda x: (x[1], x[0]), reverse=True)
+    creditors.sort(key=lambda x: (x[1], x[0]), reverse=True)
 
     transfers: List[Dict[str, Any]] = []
     i, j = 0, 0
@@ -75,34 +70,59 @@ def apply_policy_and_settle(
     end_time: datetime
 ):
     """
-    Erzeugt einen SettlementBatch + SettlementLines basierend auf Events.
-    pricing: aus event.meta["price_eur_per_kwh"], debit für consumption/base_fee, credit für generation/grid_feed/vpp_sale
+    Erzeugt einen SettlementBatch + SettlementLines.
+    Pricing:
+      - consumption/base_fee → debit
+      - generation/grid_feed/vpp_sale → credit
+      - unit==EUR → quantity ist direkt EUR
+      - sonst → kWh * price_eur_per_kwh
     """
-    # 1) Salden aus Events aufbauen
     balances: Dict[int, Dict[str, float]] = defaultdict(lambda: {"credit": 0.0, "debit": 0.0})
+
+    def add_debit(pid: int, amount_eur: float):
+        if amount_eur > 0:
+            balances[pid]["debit"] += amount_eur
+
+    def add_credit(pid: int, amount_eur: float):
+        if amount_eur > 0:
+            balances[pid]["credit"] += amount_eur
+
     for ev in events:
         price = float((ev.meta or {}).get("price_eur_per_kwh") or 0.0)
         qty = float(ev.quantity or 0.0)
-        if ev.event_type.value in ("consumption", "base_fee"):
-            balances[ev.participant_id]["debit"] += qty * price
+        unit = (ev.unit or "").lower()
+
+        if ev.event_type.value in ("consumption",):
+            amount = qty if unit == "eur" else qty * price
+            add_debit(ev.participant_id, amount)
+
+        elif ev.event_type.value in ("base_fee",):
+            amount = qty if unit in ("eur", "") else qty * price
+            add_debit(ev.participant_id, amount)
+
         elif ev.event_type.value in ("generation", "grid_feed", "vpp_sale"):
-            balances[ev.participant_id]["credit"] += qty * price
-        else:
-            # andere Typen sind für Abrechnung neutral
-            pass
+            amount = qty if unit == "eur" else qty * price
+            add_credit(ev.participant_id, amount)
+
+        # battery_charge/discharge/production sind hier neutral
 
     final_net, stats, transfers = apply_bilateral_netting(balances, policy_body)
 
-    # 2) Batch anlegen
+    # Optional: Min-Payout-Threshold aus policy
+    threshold = float((policy_body or {}).get("min_payout_eur", 0.0))
+    if threshold > 0:
+        final_net = {pid: (amt if abs(amt) >= threshold else 0.0) for pid, amt in final_net.items()}
+
+    # Batch
     batch = SettlementBatch(
         use_case=use_case,
         start_time=start_time,
         end_time=end_time,
     )
     db.add(batch)
-    db.flush()  # batch.id erhalten
+    db.flush()
 
-    # 3) Lines erzeugen
+    # Lines
     result_data: Dict[int, Dict[str, float]] = {}
     description = f"Settlement {use_case} {start_time.isoformat()} – {end_time.isoformat()}"
     for pid, amount in final_net.items():

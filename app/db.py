@@ -93,28 +93,18 @@ def _add_varchar_column_if_missing(conn, table: str, column: str, default: str =
         conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} SET NOT NULL"))
 
 def _ensure_participants_external_id(conn):
-    """
-    Spezialbehandlung für participants.external_id:
-    - Spalte anlegen falls fehlt
-    - NULL oder '' auf eindeutiges 'migrated-{id}' setzen
-    - NOT NULL setzen
-    """
     if not _column_exists(conn, "participants", "external_id"):
         conn.execute(text("ALTER TABLE participants ADD COLUMN external_id VARCHAR"))
-
-    # Eindeutig backfillen (vermeidet Kollision)
     conn.execute(text("""
-    UPDATE participants
-    SET external_id = 'migrated-' || id
-    WHERE external_id IS NULL OR external_id = ''
+        UPDATE participants
+        SET external_id = 'migrated-' || id
+        WHERE external_id IS NULL OR external_id = ''
     """))
-
     conn.execute(text("ALTER TABLE participants ALTER COLUMN external_id SET NOT NULL"))
 
 def ensure_min_schema():
-    """Enums/Tables/Spalten sicherstellen + Werte normalisieren."""
     with engine.begin() as conn:
-        # Enums (lowercase)
+        # Enums
         _ensure_enum_values(conn, "eventtype", [
             "generation", "consumption", "grid_feed", "base_fee",
             "battery_charge", "production", "vpp_sale", "battery_discharge"
@@ -124,7 +114,7 @@ def ensure_min_schema():
             "commercial", "community_fee_collector", "external_market"
         ])
 
-        # Tables (Stub)
+        # Tables
         conn.execute(text("CREATE TABLE IF NOT EXISTS participants (id SERIAL PRIMARY KEY)"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS usage_events (id SERIAL PRIMARY KEY)"))
         conn.execute(text("CREATE TABLE IF NOT EXISTS policies (id SERIAL PRIMARY KEY)"))
@@ -135,8 +125,6 @@ def ensure_min_schema():
         # participants
         _add_varchar_column_if_missing(conn, "participants", "name", "")
         _ensure_participants_external_id(conn)
-
-        # participants.role sicherstellen
         if not _column_exists(conn, "participants", "role"):
             conn.execute(text("ALTER TABLE participants ADD COLUMN role participantrole"))
             conn.execute(text("UPDATE participants SET role = 'consumer'::participantrole WHERE role IS NULL"))
@@ -147,7 +135,6 @@ def ensure_min_schema():
         if not _column_exists(conn, "usage_events", "meta"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN meta JSON"))
             conn.execute(text("ALTER TABLE usage_events ALTER COLUMN meta SET DEFAULT '{}'::json"))
-        # event_type als Enum sicherstellen
         if not _column_exists(conn, "usage_events", "event_type"):
             conn.execute(text("ALTER TABLE usage_events ADD COLUMN event_type eventtype"))
             conn.execute(text("UPDATE usage_events SET event_type = 'consumption'::eventtype WHERE event_type IS NULL"))
@@ -181,14 +168,14 @@ def ensure_min_schema():
         _add_float_column_if_missing(conn, "ledger_entries", "amount_eur", 0.0)
         _add_varchar_column_if_missing(conn, "ledger_entries", "transaction_hash", "")
 
-        # ---- Daten normalisieren (wichtiger Teil) ----
+        # Normalisieren
         conn.execute(text("""
-        UPDATE participants
-        SET role = LOWER(role::text)::participantrole
-        WHERE role::text <> LOWER(role::text)
+            UPDATE participants
+            SET role = LOWER(role::text)::participantrole
+            WHERE role::text <> LOWER(role::text)
         """))
         conn.execute(text("""
-        UPDATE usage_events
-        SET event_type = LOWER(event_type::text)::eventtype
-        WHERE event_type::text <> LOWER(event_type::text)
+            UPDATE usage_events
+            SET event_type = LOWER(event_type::text)::eventtype
+            WHERE event_type::text <> LOWER(event_type::text)
         """))

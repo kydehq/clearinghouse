@@ -1,8 +1,6 @@
 from __future__ import annotations
 import enum
-from sqlalchemy import (
-    Column, Integer, String, DateTime, Enum, Float, JSON, ForeignKey, text
-)
+from sqlalchemy import Column, Integer, String, DateTime, Enum, Float, JSON, ForeignKey, text
 from sqlalchemy.orm import relationship
 from .db import Base
 
@@ -31,11 +29,8 @@ class Participant(Base):
     id = Column(Integer, primary_key=True)
     external_id = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, default="")
-    role = Column(
-        Enum(ParticipantRole, native_enum=True, validate_strings=True),
-        default=ParticipantRole.consumer,
-        nullable=False
-    )
+    role = Column(Enum(ParticipantRole, native_enum=True, validate_strings=True),
+                  default=ParticipantRole.consumer, nullable=False)
 
 class UsageEvent(Base):
     __tablename__ = "usage_events"
